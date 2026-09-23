@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Status &mdash; Magic Eyes</title>
+<link rel="stylesheet" href="../css/app.css">
+</head>
+<body class="theme-control">
+<header class="app-header">
+  <div class="app-header-row">
+    <div class="app-header-title">
+      <span class="eye-mark">&#128065;</span>
+      <h1>Live status</h1>
+    </div>
+    <a class="home-link" href="../index.html">&larr; Home</a>
+  </div>
+</header>
+<nav class="subnav">
+  <a href="manual.html">Manual</a>
+  <a href="playmodes.html">Play modes</a>
+  <a class="active" href="status.html">Status</a>
+</nav>
+
+<main class="container">
+  <div id="msg" class="msg msg-error hidden"></div>
+
+  <div class="card">
+    <h3>Connection</h3>
+    <div class="grid cols-2">
+      <div class="stat"><span class="stat-label">WiFi mode</span><span class="stat-value" id="s-wifiMode">&mdash;</span></div>
+      <div class="stat"><span class="stat-label">IP address</span><span class="stat-value" id="s-ip">&mdash;</span></div>
+      <div class="stat"><span class="stat-label">Uptime</span><span class="stat-value" id="s-uptime">&mdash;</span></div>
+      <div class="stat"><span class="stat-label">Free heap</span><span class="stat-value" id="s-heap">&mdash;</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Play mode &amp; pose</h3>
+    <div class="grid cols-2">
+      <div class="stat"><span class="stat-label">Play mode</span><span class="stat-value" id="s-mode">&mdash;</span></div>
+      <div class="stat"><span class="stat-label">Natural mode</span><span class="stat-value" id="s-natural">&mdash;</span></div>
+      <div class="stat"><span class="stat-label">Pan / Tilt</span><span class="stat-value" id="s-pantilt">&mdash;</span></div>
+      <div class="stat"><span class="stat-label">Lids U/L L&middot;R</span><span class="stat-value" id="s-lids">&mdash;</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Radar</h3>
+    <div class="row" style="margin-bottom:0.5rem;">
+      <span id="radar-presence" class="badge badge-muted"><span class="dot dot-off"></span> unknown</span>
+      <span class="small muted" id="radar-model"></span>
+    </div>
+    <div id="radar-targets" class="mono small muted">no targets</div>
+  </div>
+</main>
+
+<footer class="app-footer">ESP Magic Eyes &mdash; live status</footer>
+
+<script src="../js/api.js"></script>
+<script>
+(function () {
+  var msgEl = document.getElementById('msg');
+  function showError(text) { msgEl.textContent = text; msgEl.classList.remove('hidden'); }
+  function clearError() { msgEl.classList.add('hidden'); }
+
+  function fmtUptime(ms) {
+    var s = Math.floor(ms / 1000);
+    var h = Math.floor(s / 3600);
+    var m = Math.floor((s % 3600) / 60);
+    var sec = s % 60;
+    return h + 'h ' + m + 'm ' + sec + 's';
+  }
+
+  Api.pollEvery(function () {
+    return Api.getSystemStatus().then(function (status) {
+      clearError();
+      document.getElementById('s-wifiMode').textContent = status.wifiMode || '—';
+      document.getElementById('s-ip').textContent = status.ipAddress || '—';
+      document.getElementById('s-mode').textContent = status.playMode || '—';
+      document.getElementById('s-natural').textContent = status.naturalMode ? 'on' : 'off';
+      if (status.pose) {
+        document.getElementById('s-pantilt').textContent =
+          status.pose.panDeg.toFixed(1) + '° / ' + status.pose.tiltDeg.toFixed(1) + '°';
+        document.getElementById('s-lids').textContent =
+          [status.pose.lidUpperL, status.pose.lidLowerL, status.pose.lidUpperR, status.pose.lidLowerR]
+            .map(function (v) { return v.toFixed(2); }).join(' / ');
+      }
+    });
+  }, 700, function (err) { showError('Status polling failed: ' + err.message); });
+
+  Api.pollEvery(function () {
+    return Api.getSystemInfo().then(function (info) {
+      document.getElementById('s-uptime').textContent = fmtUptime(info.uptimeMs || 0);
+      document.getElementById('s-heap').textContent = Math.round((info.freeHeap || 0) / 1024) + ' KB';
+    });
+  }, 3000, function (err) { console.warn('info poll failed', err); });
+
+  Api.pollEvery(function () {
+    return Api.getRadarLatest().then(function (r) {
+      var badge = document.getElementById('radar-presence');
+      if (r.presence) {
+        badge.className = 'badge badge-ok';
+        badge.innerHTML = '<span class="dot dot-ok"></span> presence detected';
+      } else {
+        badge.className = 'badge badge-muted';
+        badge.innerHTML = '<span class="dot dot-off"></span> no presence';
+      }
+      var targetsEl = document.getElementById('radar-targets');
+      if (!r.targets || !r.targets.length) {
+        targetsEl.textContent = 'no targets';
+      } else {
+        targetsEl.innerHTML = r.targets.map(function (t, i) {
+          var parts = [];
+          if (t.distanceMm !== null && t.distanceMm !== undefined) parts.push('dist=' + Math.round(t.distanceMm) + 'mm');
+          if (t.angleDeg !== null && t.angleDeg !== undefined) parts.push('angle=' + t.angleDeg.toFixed(1) + '°');
+          if (t.xMm !== null && t.xMm !== undefined) parts.push('x=' + Math.round(t.xMm) + 'mm');
+          if (t.yMm !== null && t.yMm !== undefined) parts.push('y=' + Math.round(t.yMm) + 'mm');
+          if (t.speedMmS !== null && t.speedMmS !== undefined) parts.push('speed=' + Math.round(t.speedMmS) + 'mm/s');
+          return '#' + i + ': ' + parts.join(', ');
+        }).join('<br>');
+      }
+    });
+  }, 700, function (err) { console.warn('radar poll failed', err); });
+
+  Api.getRadarStatus().then(function (s) {
+    document.getElementById('radar-model').textContent = s.sensorModel ? ('(' + s.sensorModel + ')') : '';
+  }).catch(function () { /* non-fatal */ });
+})();
+</script>
+</body>
+</html>

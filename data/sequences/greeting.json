@@ -1,0 +1,53 @@
+{
+  "_comment": "Default 'greeting' play-mode sequence (plan §5, Phase 4). Loaded by PlayModeManager on POST /api/playmodes/greeting/activate. Each keyframe is a partial EyeCommand: panDeg/tiltDeg (degrees, ±45 working range) and lidUpperL/lidLowerL/lidUpperR/lidLowerR (normalized 0=closed..1=open) are all optional — omit a field to leave that axis alone. durationMs is required; easing is 'linear' or 'easeInOut' (default if omitted). Story: wake up (eyes closed, looking down) -> open partway -> look at viewer -> wide-eyed surprise -> settle to idle's resting baseline.",
+  "keyframes": [
+    {
+      "panDeg": 0,
+      "tiltDeg": -10,
+      "lidUpperL": 0.0,
+      "lidLowerL": 0.0,
+      "lidUpperR": 0.0,
+      "lidLowerR": 0.0,
+      "durationMs": 60,
+      "easing": "linear"
+    },
+    {
+      "tiltDeg": -5,
+      "lidUpperL": 0.4,
+      "lidLowerL": 0.4,
+      "lidUpperR": 0.4,
+      "lidLowerR": 0.4,
+      "durationMs": 320,
+      "easing": "easeInOut"
+    },
+    {
+      "panDeg": 0,
+      "tiltDeg": 8,
+      "lidUpperL": 0.85,
+      "lidLowerL": 0.85,
+      "lidUpperR": 0.85,
+      "lidLowerR": 0.85,
+      "durationMs": 450,
+      "easing": "easeInOut"
+    },
+    {
+      "tiltDeg": 10,
+      "lidUpperL": 1.0,
+      "lidLowerL": 1.0,
+      "lidUpperR": 1.0,
+      "lidLowerR": 1.0,
+      "durationMs": 180,
+      "easing": "linear"
+    },
+    {
+      "panDeg": 0,
+      "tiltDeg": 0,
+      "lidUpperL": 0.85,
+      "lidLowerL": 0.85,
+      "lidUpperR": 0.85,
+      "lidLowerR": 0.85,
+      "durationMs": 500,
+      "easing": "easeInOut"
+    }
+  ]
+}

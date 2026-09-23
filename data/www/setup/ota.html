@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Firmware Update &mdash; Magic Eyes</title>
+<link rel="stylesheet" href="../css/app.css">
+</head>
+<body class="theme-setup">
+<header class="app-header">
+  <div class="app-header-row">
+    <div class="app-header-title">
+      <span class="eye-mark">&#128065;</span>
+      <h1>Firmware update</h1>
+      <span class="mode-pill">Maintenance</span>
+    </div>
+    <a class="home-link" href="../index.html">&larr; Home</a>
+  </div>
+  <div class="setup-banner">&#9888; The device reboots automatically after a successful update.</div>
+</header>
+<nav class="subnav">
+  <a href="wifi.html">WiFi</a>
+  <a href="calibration.html">Calibration</a>
+  <a href="radar.html">Radar</a>
+  <a class="active" href="ota.html">Firmware</a>
+  <a href="led.html">LED</a>
+</nav>
+
+<main class="container">
+
+  <div class="card">
+    <h3>Current version</h3>
+    <div class="grid cols-2">
+      <div class="stat"><span class="stat-label">Firmware</span><span class="stat-value" id="cur-version">&mdash;</span></div>
+      <div class="stat"><span class="stat-label">Build date</span><span class="stat-value" id="cur-build">&mdash;</span></div>
+      <div class="stat"><span class="stat-label">Radar variant</span><span class="stat-value" id="cur-radar">&mdash;</span></div>
+      <div class="stat"><span class="stat-label">Chip ID</span><span class="stat-value" id="cur-chip">&mdash;</span></div>
+    </div>
+  </div>
+
+  <div id="msg" class="msg hidden"></div>
+
+  <div class="card">
+    <h3>Firmware update</h3>
+    <p class="small muted">Upload a compiled firmware <span class="mono">.bin</span> (app image). The device reboots automatically on success.</p>
+    <input type="file" id="fw-file" accept=".bin">
+    <div class="progress" style="margin-top:0.5rem;"><div id="fw-progress"></div></div>
+    <p class="small mono" id="fw-status" style="margin-top:0.35rem;"></p>
+    <button class="btn btn-primary btn-block" id="fw-upload-btn" style="margin-top:0.5rem;" disabled>Upload firmware</button>
+  </div>
+
+  <div class="card">
+    <h3>Filesystem update</h3>
+    <p class="small muted">Upload a LittleFS image to update just the web frontend/data, independently of the firmware. The device reboots automatically on success.</p>
+    <input type="file" id="fs-file" accept=".bin">
+    <div class="progress" style="margin-top:0.5rem;"><div id="fs-progress"></div></div>
+    <p class="small mono" id="fs-status" style="margin-top:0.35rem;"></p>
+    <button class="btn btn-primary btn-block" id="fs-upload-btn" style="margin-top:0.5rem;" disabled>Upload filesystem</button>
+  </div>
+
+</main>
+
+<footer class="app-footer">ESP Magic Eyes &mdash; firmware update</footer>
+
+<script src="../js/api.js"></script>
+<script>
+(function () {
+  var msgEl = document.getElementById('msg');
+  function showMsg(text, kind) {
+    msgEl.textContent = text;
+    msgEl.className = 'msg msg-' + (kind || 'info');
+    msgEl.classList.remove('hidden');
+  }
+
+  Api.getSystemInfo().then(function (info) {
+    document.getElementById('cur-version').textContent = info.firmwareVersion || '—';
+    document.getElementById('cur-build').textContent = info.buildDate || '—';
+    document.getElementById('cur-radar').textContent = info.radarVariant || '—';
+    document.getElementById('cur-chip').textContent = info.chipId || '—';
+  }).catch(function (err) { showMsg('Could not load system info: ' + err.message, 'error'); });
+
+  function wireUpload(fileInputId, btnId, progressId, statusId, path, label) {
+    var fileInput = document.getElementById(fileInputId);
+    var btn = document.getElementById(btnId);
+    var progress = document.getElementById(progressId);
+    var status = document.getElementById(statusId);
+
+    fileInput.addEventListener('change', function () {
+      btn.disabled = !fileInput.files.length;
+    });
+
+    btn.addEventListener('click', function () {
+      var file = fileInput.files[0];
+      if (!file) return;
+      btn.disabled = true;
+      fileInput.disabled = true;
+      progress.style.width = '0%';
+      status.textContent = 'Uploading ' + label + '… (0%)';
+
+      Api.uploadFile(path, file, function (fraction) {
+        var pct = Math.round(fraction * 100);
+        progress.style.width = pct + '%';
+        status.textContent = 'Uploading ' + label + '… (' + pct + '%)';
+      }).then(function (res) {
+        progress.style.width = '100%';
+        if (res && res.success) {
+          status.textContent = 'Upload complete (' + res.bytesWritten + ' bytes). Device is rebooting…';
+          showMsg(label + ' update succeeded. The device is rebooting now; this page will stop responding until it comes back up.', 'ok');
+          pollOtaStatus();
+        } else {
+          status.textContent = 'Upload finished but reported failure.';
+          showMsg((res && res.error) || 'Upload failed.', 'error');
+          btn.disabled = false;
+          fileInput.disabled = false;
+        }
+      }).catch(function (err) {
+        status.textContent = 'Upload failed: ' + err.message;
+        showMsg((label + ' upload failed: ') + err.message, 'error');
+        btn.disabled = false;
+        fileInput.disabled = false;
+      });
+    });
+  }
+
+  function pollOtaStatus() {
+    var stop = Api.pollEvery(function () {
+      return Api.getOtaStatus().then(function (s) {
+        if (s.result === 'success') {
+          showMsg('Update applied. Device has rebooted (or is rebooting). Reload this page once it is back online.', 'ok');
+          stop();
+        } else if (s.result === 'failure') {
+          showMsg('Update failed: ' + (s.error || 'unknown error'), 'error');
+          stop();
+        }
+      });
+    }, 1000, function () { /* device may be mid-reboot — expected to fail transiently */ });
+  }
+
+  wireUpload('fw-file', 'fw-upload-btn', 'fw-progress', 'fw-status', '/api/ota/firmware', 'firmware');
+  wireUpload('fs-file', 'fs-upload-btn', 'fs-progress', 'fs-status', '/api/ota/filesystem', 'filesystem');
+})();
+</script>
+</body>
+</html>

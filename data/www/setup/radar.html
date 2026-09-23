@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Radar Test &mdash; Magic Eyes</title>
+<link rel="stylesheet" href="../css/app.css">
+</head>
+<body class="theme-setup">
+<header class="app-header">
+  <div class="app-header-row">
+    <div class="app-header-title">
+      <span class="eye-mark">&#128065;</span>
+      <h1>Radar test</h1>
+      <span class="mode-pill">Maintenance</span>
+    </div>
+    <a class="home-link" href="../index.html">&larr; Home</a>
+  </div>
+  <div class="setup-banner">&#9888; Maintenance page &mdash; live sensor diagnostics.</div>
+</header>
+<nav class="subnav">
+  <a href="wifi.html">WiFi</a>
+  <a href="calibration.html">Calibration</a>
+  <a class="active" href="radar.html">Radar</a>
+  <a href="ota.html">Firmware</a>
+  <a href="led.html">LED</a>
+</nav>
+
+<main class="container">
+  <div id="msg" class="msg hidden"></div>
+
+  <div class="card">
+    <h3>Sensor</h3>
+    <div class="row between">
+      <span id="presence-badge" class="badge badge-muted"><span class="dot dot-off"></span> unknown</span>
+      <span class="small mono" id="sensor-model">&mdash;</span>
+    </div>
+    <p class="small muted" style="margin-top:0.5rem;">
+      Link: <span id="link-ok">&mdash;</span> &middot; last update: <span id="last-update">&mdash;</span>
+    </p>
+    <p class="small muted" style="margin-top:0.25rem;">
+      Handshake at boot: <span id="begin-ok">&mdash;</span> &middot;
+      raw UART bytes seen: <span id="raw-bytes">&mdash;</span>
+      <span id="raw-bytes-hint"></span>
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>UART speed (LD2420 only)</h3>
+    <p class="small muted" style="margin-top:0;">
+      The sensor's baud rate depends on its own firmware version &mdash;
+      115200 for module firmware &ge; v1.5.3, 256000 for older modules.
+      Saving reboots the device so the radar link reopens at the new speed.
+    </p>
+    <div class="row" style="gap:0.5rem;">
+      <select id="radar-baud" style="flex:1;">
+        <option value="115200">115200 (fw &ge; v1.5.3, most common)</option>
+        <option value="256000">256000 (older module firmware)</option>
+      </select>
+      <button class="btn btn-primary" id="baud-save-btn">Save &amp; reboot</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Visualization</h3>
+    <div id="viz-canvas-wrap" class="radar-canvas-wrap hidden">
+      <canvas id="radar-canvas" class="radar-canvas" width="340" height="340"></canvas>
+    </div>
+    <div id="viz-gauge-wrap" class="hidden">
+      <p class="small muted">Distance to nearest target</p>
+      <div class="distance-gauge"><div id="gauge-fill"></div></div>
+      <p class="mono small" id="gauge-label" style="margin-top:0.35rem;">&mdash;</p>
+    </div>
+    <p id="viz-empty" class="muted small">Waiting for radar data&hellip;</p>
+    <p class="small muted" id="angle-note" style="margin-top:0.75rem;">
+      This build's sensor does not report target angle/position &mdash; only
+      distance. Full directional tracking requires the LD2450 sensor
+      upgrade (drop-in replacement, build-time selectable).
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>Raw targets</h3>
+    <div id="raw-targets" class="mono small muted">no targets</div>
+  </div>
+</main>
+
+<footer class="app-footer">ESP Magic Eyes &mdash; radar test</footer>
+
+<script src="../js/api.js"></script>
+<script>
+(function () {
+  var msgEl = document.getElementById('msg');
+  function showMsg(text, kind) {
+    msgEl.textContent = text;
+    msgEl.className = 'msg msg-' + (kind || 'info');
+    msgEl.classList.remove('hidden');
+  }
+
+  var canvas = document.getElementById('radar-canvas');
+  var ctx = canvas.getContext('2d');
+  var MAX_RANGE_MM = 6000; // plot scale; adjusted dynamically if targets exceed it
+
+  function drawTargets(targets) {
+    var w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    var cx = w / 2, cy = h - 10;
+    var scale = (h - 20) / MAX_RANGE_MM;
+
+    // Range rings
+    ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue('--border') || '#ccc';
+    ctx.lineWidth = 1;
+    for (var ring = 1; ring <= 3; ring++) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, (MAX_RANGE_MM / 3 * ring) * scale, Math.PI, 2 * Math.PI);
+      ctx.stroke();
+    }
+    // Sensor position
+    ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--text-muted') || '#888';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3, 0, 2 * Math.PI);
+    ctx.fill();
+
+    var accent = getComputedStyle(document.body).getPropertyValue('--setup-accent') || '#d9822b';
+    targets.forEach(function (t) {
+      var x, y;
+      if (t.xMm !== null && t.xMm !== undefined && t.yMm !== null && t.yMm !== undefined) {
+        x = cx + t.xMm * scale;
+        y = cy - t.yMm * scale;
+      } else if (t.angleDeg !== null && t.angleDeg !== undefined && t.distanceMm !== null && t.distanceMm !== undefined) {
+        var rad = (t.angleDeg) * Math.PI / 180;
+        x = cx + t.distanceMm * Math.sin(rad) * scale;
+        y = cy - t.distanceMm * Math.cos(rad) * scale;
+      } else {
+        return;
+      }
+      ctx.fillStyle = accent;
+      ctx.beginPath();
+      ctx.arc(x, y, 7, 0, 2 * Math.PI);
+      ctx.fill();
+    });
+  }
+
+  function fmt(v, unit, digits) {
+    if (v === null || v === undefined) return null;
+    return (digits ? v.toFixed(digits) : Math.round(v)) + unit;
+  }
+
+  Api.pollEvery(function () {
+    return Api.getRadarLatest().then(function (r) {
+      var badge = document.getElementById('presence-badge');
+      if (r.presence) {
+        badge.className = 'badge badge-ok';
+        badge.innerHTML = '<span class="dot dot-ok"></span> presence detected';
+      } else {
+        badge.className = 'badge badge-muted';
+        badge.innerHTML = '<span class="dot dot-off"></span> no presence';
+      }
+      document.getElementById('last-update').textContent = r.lastUpdateMs ? (r.lastUpdateMs + ' ms (device uptime)') : '—';
+
+      var targets = r.targets || [];
+      var rawEl = document.getElementById('raw-targets');
+      var emptyEl = document.getElementById('viz-empty');
+      var canvasWrap = document.getElementById('viz-canvas-wrap');
+      var gaugeWrap = document.getElementById('viz-gauge-wrap');
+      var angleNote = document.getElementById('angle-note');
+
+      if (!targets.length) {
+        rawEl.textContent = 'no targets';
+        emptyEl.classList.remove('hidden');
+        canvasWrap.classList.add('hidden');
+        gaugeWrap.classList.add('hidden');
+        return;
+      }
+      emptyEl.classList.add('hidden');
+
+      rawEl.innerHTML = targets.map(function (t, i) {
+        var parts = [];
+        var d = fmt(t.distanceMm, 'mm'); if (d) parts.push('distanceMm=' + d);
+        var a = fmt(t.angleDeg, '°', 1); if (a) parts.push('angleDeg=' + a);
+        var x = fmt(t.xMm, 'mm'); if (x) parts.push('xMm=' + x);
+        var y = fmt(t.yMm, 'mm'); if (y) parts.push('yMm=' + y);
+        var sp = fmt(t.speedMmS, 'mm/s'); if (sp) parts.push('speedMmS=' + sp);
+        return '#' + i + ': { ' + parts.join(', ') + ' }';
+      }).join('<br>');
+
+      // Adapt to whichever fields are actually present, per-target, rather
+      // than branching on build variant (LD2420 vs LD2450) — the same page
+      // must work unmodified against either firmware.
+      var hasPosition = targets.some(function (t) {
+        return (t.xMm !== null && t.xMm !== undefined) || (t.angleDeg !== null && t.angleDeg !== undefined);
+      });
+
+      if (hasPosition) {
+        canvasWrap.classList.remove('hidden');
+        gaugeWrap.classList.add('hidden');
+        angleNote.classList.add('hidden');
+        drawTargets(targets);
+      } else {
+        canvasWrap.classList.add('hidden');
+        gaugeWrap.classList.remove('hidden');
+        angleNote.classList.remove('hidden');
+        var nearest = targets.reduce(function (min, t) {
+          if (t.distanceMm === null || t.distanceMm === undefined) return min;
+          return (min === null || t.distanceMm < min) ? t.distanceMm : min;
+        }, null);
+        if (nearest !== null) {
+          var pct = Math.max(0, Math.min(100, 100 - (nearest / MAX_RANGE_MM) * 100));
+          document.getElementById('gauge-fill').style.width = pct + '%';
+          document.getElementById('gauge-label').textContent = Math.round(nearest) + ' mm';
+        } else {
+          document.getElementById('gauge-fill').style.width = '0%';
+          document.getElementById('gauge-label').textContent = 'no distance reported';
+        }
+      }
+    });
+  }, 250, function (err) { showMsg('Radar polling failed: ' + err.message, 'error'); });
+
+  Api.pollEvery(function () {
+    return Api.getRadarStatus().then(function (s) {
+      document.getElementById('sensor-model').textContent = s.sensorModel || '—';
+      var linkEl = document.getElementById('link-ok');
+      linkEl.textContent = s.linkOk ? 'ok' : 'no recent data';
+      linkEl.className = s.linkOk ? '' : 'muted';
+
+      document.getElementById('begin-ok').textContent = s.beginOk ? 'ok' : 'failed / no response';
+      document.getElementById('raw-bytes').textContent = s.rawBytesSeen;
+      var hintEl = document.getElementById('raw-bytes-hint');
+      if (s.rawBytesSeen === 0) {
+        hintEl.textContent = ' — zero bytes ever seen on the UART: points to wiring/power, not firmware.';
+      } else if (!s.linkOk) {
+        hintEl.textContent = ' — bytes are arriving but not forming valid frames: likely a baud/protocol mismatch, not wiring.';
+      } else {
+        hintEl.textContent = '';
+      }
+    });
+  }, 2000, function (err) { console.warn('radar status poll failed', err); });
+
+  var baudSelect = document.getElementById('radar-baud');
+  Api.getRadarConfig().then(function (cfg) {
+    baudSelect.value = String(cfg.baudRate);
+  }).catch(function (err) {
+    showMsg('Could not load radar config: ' + err.message, 'error');
+  });
+
+  document.getElementById('baud-save-btn').addEventListener('click', function () {
+    var btn = this;
+    btn.disabled = true;
+    Api.setRadarConfig({ baudRate: parseInt(baudSelect.value, 10) })
+      .then(function () { showMsg('Saved. Device is rebooting to apply the new speed…', 'ok'); })
+      .catch(function (err) { showMsg('Save failed: ' + err.message, 'error'); btn.disabled = false; });
+  });
+})();
+</script>
+</body>
+</html>

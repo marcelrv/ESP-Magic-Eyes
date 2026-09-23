@@ -17,3 +17,6 @@ Thumbs.db
 # Editor/backup files
 *~
 *.swp
+
+# Local tool binaries (not part of the project)
+esptool.exe

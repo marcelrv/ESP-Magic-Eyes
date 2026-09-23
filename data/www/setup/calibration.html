@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Servo Calibration &mdash; Magic Eyes</title>
+<link rel="stylesheet" href="../css/app.css">
+</head>
+<body class="theme-setup">
+<header class="app-header">
+  <div class="app-header-row">
+    <div class="app-header-title">
+      <span class="eye-mark">&#128065;</span>
+      <h1>Servo calibration</h1>
+      <span class="mode-pill">Maintenance</span>
+    </div>
+    <a class="home-link" href="../index.html">&larr; Home</a>
+  </div>
+  <div class="setup-banner">&#9888; Sliders move servos directly &mdash; keep the mechanism clear.</div>
+</header>
+<nav class="subnav">
+  <a href="wifi.html">WiFi</a>
+  <a class="active" href="calibration.html">Calibration</a>
+  <a href="radar.html">Radar</a>
+  <a href="ota.html">Firmware</a>
+  <a href="led.html">LED</a>
+</nav>
+
+<main class="container">
+  <div id="msg" class="msg hidden"></div>
+
+  <section class="card">
+    <div class="row between">
+      <span id="hold-badge" class="badge badge-muted">Connecting&hellip;</span>
+      <button id="hold-btn" class="btn btn-sm" disabled>Resume motion</button>
+    </div>
+    <p class="small muted" style="margin:0.6rem 0 0;">While this page is open, normal eye motion is paused so the
+      servos stay exactly where the sliders put them. Motion resumes automatically about 30&nbsp;s after
+      you leave this page, or right away with &ldquo;Resume motion&rdquo;.</p>
+  </section>
+
+  <section class="card">
+    <h2>Reference poses</h2>
+    <p class="small muted">Move all servos at once, using the current slider values (including unsaved changes).</p>
+    <div class="btn-group">
+      <button class="btn btn-sm pose-btn" data-pose="closed">Straight + closed</button>
+      <button class="btn btn-sm pose-btn" data-pose="half">Straight + half open</button>
+      <button class="btn btn-sm pose-btn" data-pose="open">Straight + open</button>
+      <button class="btn btn-sm pose-btn" data-pose="rest">Straight + resting (85%)</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>1. Look straight ahead</h2>
+    <p class="small muted">Adjust pan and tilt until both eyes look straight forward. This is the 0&deg; point
+      every gaze movement is measured from.</p>
+    <div id="step-gaze"></div>
+    <div class="row between">
+      <div class="btn-group">
+        <button class="btn btn-sm dir-btn" data-axis="0" data-sign="1">Check: look right</button>
+        <button class="btn btn-sm dir-btn" data-axis="1" data-sign="1">Check: look up</button>
+      </div>
+      <button class="btn btn-primary btn-sm save-btn" data-step="gaze">Save straight ahead</button>
+    </div>
+    <p class="small muted" style="margin:0.5rem 0 0;">&ldquo;Check&rdquo; briefly moves the eyes the way a
+      positive command would (same as dragging right/up on the manual gaze pad). If they go the wrong way,
+      tick &ldquo;Reversed&rdquo; for that servo and save.</p>
+  </section>
+
+  <section class="card">
+    <h2>2. Close the lids &mdash; just touching</h2>
+    <p class="small muted">With the eyes straight ahead, move each lid until upper and lower lid
+      <strong>just touch</strong> each other. Blinks, winks and sleep close the lids exactly to this point.</p>
+    <button class="btn btn-sm pose-btn" data-pose="closed" style="margin-bottom:0.75rem;">Go to straight + closed</button>
+    <div id="step-closed"></div>
+    <div class="row" style="justify-content:flex-end;">
+      <button class="btn btn-primary btn-sm save-btn" data-step="lids">Save lids</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>3. Open the lids</h2>
+    <p class="small muted">Move each lid to its fully open position. Resting and natural-mode lid positions
+      are measured between this point and the closed point.</p>
+    <button class="btn btn-sm pose-btn" data-pose="open" style="margin-bottom:0.75rem;">Go to straight + open</button>
+    <div id="step-open"></div>
+    <div class="row" style="justify-content:flex-end;">
+      <button class="btn btn-primary btn-sm save-btn" data-step="lids">Save lids</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>4. Half open &mdash; make both eyes match</h2>
+    <p class="small muted">Lid linkages aren&rsquo;t linear and differ per eye, so with only closed and open
+      calibrated, in-between positions (like the resting look in natural mode) can sit at different heights
+      left and right. Move each lid to <strong>half open</strong> so the left and right eye look the same.</p>
+    <button class="btn btn-sm pose-btn" data-pose="half" style="margin-bottom:0.75rem;">Go to straight + half open</button>
+    <div id="step-half"></div>
+    <div class="row" style="justify-content:flex-end;">
+      <button class="btn btn-primary btn-sm save-btn" data-step="lids">Save lids</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Compare both eyes</h2>
+    <p class="small muted">Sweep all four lids together through the calibrated range (current slider values,
+      including unsaved changes). Both eyes should look the same at every position; if one is off somewhere,
+      adjust the nearest calibration point above.</p>
+    <div class="slider-row">
+      <label for="preview">Openness</label>
+      <input type="range" id="preview" min="0" max="100" step="1" value="85">
+      <span class="val" id="preview-val">85%</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary><strong>5. Safety limits (advanced)</strong></summary>
+      <p class="small muted" style="margin-top:0.6rem;">Hard limits the motion engine will never drive past.
+        For pan/tilt they are also the &plusmn;45&deg; ends of the gaze range. Lid limits are widened
+        automatically on save if they don&rsquo;t include the closed/open points.</p>
+      <div id="step-limits"></div>
+      <div class="row" style="justify-content:flex-end;">
+        <button class="btn btn-primary btn-sm save-btn" data-step="all">Save all</button>
+      </div>
+    </details>
+  </section>
+</main>
+
+<footer class="app-footer">ESP Magic Eyes &mdash; servo calibration</footer>
+
+<script src="../js/api.js"></script>
+<script>
+(function () {
+  var ABS_MIN = 500, ABS_MAX = 2500;
+  var GAZE_RANGE_DEG = 45;
+  var LABELS = {
+    pan: 'Pan', tilt: 'Tilt',
+    lidUpperL: 'Left eye — upper', lidLowerL: 'Left eye — lower',
+    lidUpperR: 'Right eye — upper', lidLowerR: 'Right eye — lower',
+    aux: 'Aux'
+  };
+
+  var msgEl = document.getElementById('msg');
+  function showMsg(text, kind) {
+    msgEl.textContent = text;
+    msgEl.className = 'msg msg-' + (kind || 'info');
+    msgEl.classList.remove('hidden');
+  }
+
+  var servos = [];   // GET /api/servos/config rows, edited in place
+  var byId = {};
+  var controls = {}; // "<servoId>:<field>" -> { input, val }
+
+  function clampUs(v) { return Math.max(ABS_MIN, Math.min(ABS_MAX, Math.round(v))); }
+
+  // --- Calibration hold ------------------------------------------------------
+  var holdTimer = null;
+  var holdBadge = document.getElementById('hold-badge');
+  var holdBtn = document.getElementById('hold-btn');
+
+  function setHoldUi(held) {
+    holdBadge.textContent = held ? 'Motion paused for calibration' : 'Motion running';
+    holdBadge.className = 'badge ' + (held ? 'badge-warn' : 'badge-muted');
+    holdBtn.textContent = held ? 'Resume motion' : 'Pause motion';
+    holdBtn.disabled = false;
+    holdBtn.dataset.held = held ? '1' : '';
+  }
+
+  function startHold() {
+    return Api.servoHold(true).then(function () {
+      setHoldUi(true);
+      if (!holdTimer) {
+        holdTimer = setInterval(function () {
+          Api.servoHold(true).catch(function () { /* transient */ });
+        }, 10000);
+      }
+    });
+  }
+
+  function stopHold() {
+    if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
+    return Api.servoHold(false).then(function () { setHoldUi(false); });
+  }
+
+  holdBtn.addEventListener('click', function () {
+    holdBtn.disabled = true;
+    (holdBtn.dataset.held ? stopHold() : startHold())
+      .catch(function (err) { showMsg('Could not change motion hold: ' + err.message, 'error'); holdBtn.disabled = false; });
+  });
+
+  window.addEventListener('pagehide', function () {
+    if (!holdTimer) return;
+    try {
+      fetch('/api/servos/hold', {
+        method: 'POST', keepalive: true,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: false })
+      });
+    } catch (e) { /* the hold also expires on its own */ }
+  });
+
+  // --- Live servo writes -----------------------------------------------------
+  // One throttle per servo so dragging two sliders quickly doesn't starve either.
+  var senders = {};
+  function sendPulse(servoId, us) {
+    if (!senders[servoId]) {
+      senders[servoId] = Api.throttle(function (id, pulse) {
+        Api.testServo(id, pulse).then(function () {
+          if (!holdTimer) startHold().catch(function () {});
+        }).catch(function (err) { showMsg('Servo ' + id + ': ' + err.message, 'error'); });
+      }, 80);
+    }
+    senders[servoId](servoId, us);
+  }
+
+  function sendPose(pulses) {
+    return Api.servoPose(pulses).then(function () {
+      if (!holdTimer) startHold().catch(function () {});
+    });
+  }
+
+  // --- Slider control ----------------------------------------------------------
+  // Range slider plus -10/-1/+1/+10 nudges for fine tuning. Every change
+  // updates the in-memory calibration and moves the servo live.
+  function sliderControl(servo, field, label) {
+    var key = servo.servoId + ':' + field;
+    var wrap = document.createElement('div');
+    wrap.className = 'cal-ctl';
+    wrap.innerHTML =
+      '<div class="row between"><label>' + label + '</label><span class="val mono"></span></div>' +
+      '<div class="cal-slider">' +
+        '<button class="btn btn-sm nudge" data-d="-10">&minus;10</button>' +
+        '<button class="btn btn-sm nudge" data-d="-1">&minus;1</button>' +
+        '<input type="range" min="' + ABS_MIN + '" max="' + ABS_MAX + '" step="1">' +
+        '<button class="btn btn-sm nudge" data-d="1">+1</button>' +
+        '<button class="btn btn-sm nudge" data-d="10">+10</button>' +
+      '</div>';
+    var input = wrap.querySelector('input');
+    var val = wrap.querySelector('.val');
+    controls[key] = { input: input, val: val };
+
+    function apply(us, move) {
+      us = clampUs(us);
+      servo[field] = us;
+      syncControls(servo.servoId, field);
+      if (move) sendPulse(servo.servoId, us);
+    }
+    input.addEventListener('input', function () { apply(parseInt(input.value, 10), true); });
+    wrap.querySelectorAll('.nudge').forEach(function (b) {
+      b.addEventListener('click', function () { apply(servo[field] + parseInt(b.dataset.d, 10), true); });
+    });
+    apply(servo[field], false);
+    return wrap;
+  }
+
+  // The same field can appear in more than one step (e.g. closedUs in step
+  // 2 only, but kept generic) — keep every control for it in sync.
+  function syncControls(servoId, field) {
+    var c = controls[servoId + ':' + field];
+    if (!c) return;
+    var v = byId[servoId][field];
+    c.input.value = v;
+    c.val.textContent = v + ' µs';
+  }
+
+  function checkbox(servo, text) {
+    var lbl = document.createElement('label');
+    lbl.className = 'switch-row small';
+    lbl.innerHTML = '<span>' + text + '</span><input type="checkbox"' + (servo.inverted ? ' checked' : '') + '>';
+    lbl.querySelector('input').addEventListener('change', function (e) { servo.inverted = e.target.checked; });
+    return lbl;
+  }
+
+  function sub(title) {
+    var h = document.createElement('h3');
+    h.className = 'small muted';
+    h.style.margin = '0.75rem 0 0.25rem';
+    h.textContent = title;
+    return h;
+  }
+
+  // --- Poses from current (unsaved) slider values ----------------------------
+  // Same piecewise-linear closed -> half -> open mapping as the firmware
+  // (motion_task.cpp normalizedToPulseUs).
+  function lidPulse(s, n) {
+    return n <= 0.5 ? s.closedUs + (n / 0.5) * (s.halfUs - s.closedUs)
+                    : s.halfUs + ((n - 0.5) / 0.5) * (s.openUs - s.halfUs);
+  }
+
+  var POSE_OPENNESS = { closed: 0, half: 0.5, open: 1, rest: 0.85 };
+
+  function posePulses(openness) {
+    return servos.filter(function (s) { return s.kind !== 'aux'; }).map(function (s) {
+      var us = s.kind === 'lid' ? lidPulse(s, openness) : s.centerUs;
+      return { servoId: s.servoId, pulseUs: clampUs(us) };
+    });
+  }
+
+  var previewInput = document.getElementById('preview');
+  var previewVal = document.getElementById('preview-val');
+  var sendPreview = Api.throttle(function (n) {
+    sendPose(posePulses(n)).catch(function (err) { showMsg('Preview failed: ' + err.message, 'error'); });
+  }, 80);
+  previewInput.addEventListener('input', function () {
+    previewVal.textContent = previewInput.value + '%';
+    sendPreview(parseInt(previewInput.value, 10) / 100);
+  });
+
+  document.querySelectorAll('.pose-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      sendPose(posePulses(POSE_OPENNESS[btn.dataset.pose]))
+        .catch(function (err) { showMsg('Pose failed: ' + err.message, 'error'); });
+    });
+  });
+
+  // "Check" direction: briefly go to +20deg the way MotionTask would map it
+  // (including the current Reversed tick-box), then back to straight.
+  document.querySelectorAll('.dir-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var s = byId[parseInt(btn.dataset.axis, 10)];
+      var t = 20 / GAZE_RANGE_DEG * (s.inverted ? -1 : 1);
+      var us = t >= 0 ? s.centerUs + t * (s.maxUs - s.centerUs) : s.centerUs + t * (s.centerUs - s.minUs);
+      sendPose([{ servoId: s.servoId, pulseUs: clampUs(us) }])
+        .then(function () {
+          setTimeout(function () { sendPose([{ servoId: s.servoId, pulseUs: s.centerUs }]).catch(function () {}); }, 900);
+        })
+        .catch(function (err) { showMsg('Check failed: ' + err.message, 'error'); });
+    });
+  });
+
+  // --- Saving ------------------------------------------------------------------
+  // Widen limits so they always contain the calibrated points (the API
+  // rejects a calibration whose points fall outside min/max).
+  function payloadFor(s) {
+    if (s.kind === 'lid') {
+      s.minUs = Math.min(s.minUs, s.closedUs, s.openUs);
+      s.maxUs = Math.max(s.maxUs, s.closedUs, s.openUs);
+      syncControls(s.servoId, 'minUs');
+      syncControls(s.servoId, 'maxUs');
+      return { servoId: s.servoId, minUs: s.minUs, maxUs: s.maxUs, closedUs: s.closedUs, halfUs: s.halfUs,
+               openUs: s.openUs };
+    }
+    if (s.minUs >= s.centerUs) { s.minUs = clampUs(s.centerUs - 10); syncControls(s.servoId, 'minUs'); }
+    if (s.maxUs <= s.centerUs) { s.maxUs = clampUs(s.centerUs + 10); syncControls(s.servoId, 'maxUs'); }
+    return { servoId: s.servoId, minUs: s.minUs, centerUs: s.centerUs, maxUs: s.maxUs, inverted: s.inverted };
+  }
+
+  function halfBetween(s) {
+    return (s.closedUs < s.halfUs && s.halfUs < s.openUs) || (s.openUs < s.halfUs && s.halfUs < s.closedUs);
+  }
+
+  function saveServos(list) {
+    // Sequential: each save is a read-modify-write of the NVS table.
+    var chain = Promise.resolve();
+    list.forEach(function (s) {
+      var problem = null;
+      if (s.kind === 'lid' && s.closedUs === s.openUs) problem = 'closed and open are the same position';
+      else if (s.kind === 'lid' && !halfBetween(s)) problem = 'half open must lie between closed and open (step 4)';
+      if (problem) {
+        chain = chain.then(function () { throw new Error(LABELS[s.name] + ': ' + problem); });
+        return;
+      }
+      chain = chain.then(function () { return Api.setServoConfig(payloadFor(s)); });
+    });
+    return chain;
+  }
+
+  document.querySelectorAll('.save-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var step = btn.dataset.step;
+      var list = servos.filter(function (s) {
+        return step === 'all' || (step === 'gaze' ? s.kind === 'gaze' : s.kind === 'lid');
+      });
+      btn.disabled = true;
+      saveServos(list)
+        .then(function () { showMsg('Calibration saved.', 'ok'); })
+        .catch(function (err) { showMsg('Save failed: ' + err.message, 'error'); })
+        .finally(function () { btn.disabled = false; });
+    });
+  });
+
+  // --- Build the page ------------------------------------------------------------
+  Api.getServoConfig().then(function (list) {
+    servos = list || [];
+    servos.forEach(function (s) {
+      byId[s.servoId] = s;
+      if (!s.kind) s.kind = /^lid/.test(s.name) ? 'lid' : (s.name === 'pan' || s.name === 'tilt') ? 'gaze' : 'aux';
+      if (s.kind === 'lid' && typeof s.halfUs !== 'number') s.halfUs = Math.round((s.closedUs + s.openUs) / 2);
+    });
+    var gaze = servos.filter(function (s) { return s.kind === 'gaze'; });
+    var lids = servos.filter(function (s) { return s.kind === 'lid'; });
+
+    var stepGaze = document.getElementById('step-gaze');
+    gaze.forEach(function (s) {
+      stepGaze.appendChild(sliderControl(s, 'centerUs', LABELS[s.name] + ' — straight ahead'));
+      stepGaze.appendChild(checkbox(s, 'Reversed'));
+    });
+
+    var stepClosed = document.getElementById('step-closed');
+    var stepOpen = document.getElementById('step-open');
+    var stepHalf = document.getElementById('step-half');
+    lids.forEach(function (s) {
+      stepClosed.appendChild(sliderControl(s, 'closedUs', LABELS[s.name]));
+      stepOpen.appendChild(sliderControl(s, 'openUs', LABELS[s.name]));
+      stepHalf.appendChild(sliderControl(s, 'halfUs', LABELS[s.name]));
+    });
+
+    var stepLimits = document.getElementById('step-limits');
+    servos.forEach(function (s) {
+      stepLimits.appendChild(sub(LABELS[s.name] || s.name));
+      stepLimits.appendChild(sliderControl(s, 'minUs', 'Minimum'));
+      stepLimits.appendChild(sliderControl(s, 'maxUs', 'Maximum'));
+      if (s.kind === 'aux') stepLimits.appendChild(sliderControl(s, 'centerUs', 'Neutral'));
+    });
+
+    return startHold();
+  }).catch(function (err) {
+    showMsg('Could not load servo configuration: ' + err.message, 'error');
+  });
+})();
+</script>
+</body>
+</html>
