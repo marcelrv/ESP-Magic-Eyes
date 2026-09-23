@@ -34,12 +34,12 @@ constexpr uint32_t kLd2450BaudRate = 256000;
 constexpr size_t kLd2450FrameBytes = 4 + 3 * 8 + 2;
 
 // Decodes one LD2450 coordinate/speed field's non-standard sign encoding
-// (plan §6, task spec — double-checked against the plan's own wording,
-// which had the branches swapped): the sensor's high bit (0x8000) marks a
-// NEGATIVE value, with the magnitude in the low 15 bits — not standard
-// two's complement. `raw & 0x8000` set -> negative, magnitude
-// `raw & 0x7FFF`; clear -> the raw value is the (non-negative) result
-// as-is.
+// (not two's complement). Per the HLK-LD2450 manual's worked example and
+// ESPHome's ld2450 driver: the high bit (0x8000) set means POSITIVE, with
+// the magnitude in the low 15 bits (Y 0x86B1 -> +1713 mm); high bit clear
+// means NEGATIVE, magnitude = the raw value (X 0x030E -> -782 mm). A target
+// in front of the sensor therefore always has Y's high bit set. Speed is in
+// cm/s, coordinates in mm.
 int16_t decodeLd2450Signed(uint16_t raw);
 
 // Pure parser: scans exactly `kLd2450FrameBytes` bytes starting at `buf` for

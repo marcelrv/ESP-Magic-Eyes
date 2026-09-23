@@ -22,9 +22,9 @@ uint16_t readU16LE(const uint8_t *buf, size_t offset) {
 
 int16_t decodeLd2450Signed(uint16_t raw) {
   if (raw & 0x8000) {
-    return -static_cast<int16_t>(raw & 0x7FFF);
+    return static_cast<int16_t>(raw & 0x7FFF);
   }
-  return static_cast<int16_t>(raw);
+  return static_cast<int16_t>(-static_cast<int16_t>(raw));
 }
 
 bool parseLd2450Frame(const uint8_t *buf, size_t len, RadarState &out) {
@@ -58,7 +58,7 @@ bool parseLd2450Frame(const uint8_t *buf, size_t len, RadarState &out) {
     RadarTarget &t = result.targets[result.targetCount++];
     t.xMm = static_cast<float>(x);
     t.yMm = static_cast<float>(y);
-    t.speedMmS = static_cast<float>(speed);
+    t.speedMmS = static_cast<float>(speed) * 10.0f; // sensor reports cm/s
     t.distanceMm = std::sqrt(static_cast<float>(x) * x + static_cast<float>(y) * y);
     // atan2(x, y): 0 deg = straight ahead (+y), positive = to the sensor's
     // right (+x) — matches MotionTask's pan convention closely enough to

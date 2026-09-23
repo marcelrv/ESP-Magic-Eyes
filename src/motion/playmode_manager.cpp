@@ -6,6 +6,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
+#include <atomic>
 #include <cstring>
 
 #include "motion/command_queue.h"
@@ -40,7 +41,9 @@ const ModeDef kModes[] = {
 };
 constexpr size_t kModeCount = sizeof(kModes) / sizeof(kModes[0]);
 
-Mode gActiveMode = Mode::Manual;
+// Atomic: written from the AsyncTCP/HTTP task (activate()) and from
+// MotionTask (greeting's settle-to-idle), read every MotionTask tick.
+std::atomic<Mode> gActiveMode{Mode::Manual};
 
 const ModeDef *findModeDef(Mode m) {
   for (const auto &d : kModes) {
@@ -74,7 +77,7 @@ void startIdle(uint32_t nowMs) {
 }
 
 void idleTick(uint32_t nowMs) {
-  if (nowMs >= gDriftNextMs) {
+  if (deadlineReached(nowMs, gDriftNextMs)) {
     EyeCommand cmd;
     cmd.panDeg = static_cast<float>(random(-800, 801)) / 100.0f;  // ±8.00°
     cmd.tiltDeg = static_cast<float>(random(-500, 501)) / 100.0f; // ±5.00°
@@ -83,7 +86,7 @@ void idleTick(uint32_t nowMs) {
     pushPlayModeCommand(cmd);
     gDriftNextMs = nowMs + random(2500, 5500);
   }
-  if (nowMs >= gBlinkNextMs) {
+  if (deadlineReached(nowMs, gBlinkNextMs)) {
     GestureEngine::trigger("blink", CommandSource::PlayMode);
     gBlinkNextMs = nowMs + random(4000, 9000);
   }
@@ -98,7 +101,7 @@ void curiousTick(uint32_t nowMs) {
   // Fully code-parameterized (amplitude/frequency only, no JSON) — see
   // PROGRESS.md Phase 4 notes for why a full JSON-driven "curious"
   // behavior was judged out of scope for this phase.
-  if (nowMs >= gDriftNextMs) {
+  if (deadlineReached(nowMs, gDriftNextMs)) {
     EyeCommand cmd;
     cmd.panDeg = static_cast<float>(random(-3500, 3501)) / 100.0f;  // ±35°
     cmd.tiltDeg = static_cast<float>(random(-2000, 2001)) / 100.0f; // ±20°
@@ -107,7 +110,7 @@ void curiousTick(uint32_t nowMs) {
     pushPlayModeCommand(cmd);
     gDriftNextMs = nowMs + random(1200, 3000);
   }
-  if (nowMs >= gBlinkNextMs) {
+  if (deadlineReached(nowMs, gBlinkNextMs)) {
     GestureEngine::trigger("blink", CommandSource::PlayMode);
     gBlinkNextMs = nowMs + random(1800, 4200);
   }
@@ -142,7 +145,7 @@ void startSleep(uint32_t nowMs) {
 }
 
 void sleepTick(uint32_t nowMs) {
-  if (nowMs >= gDriftNextMs) {
+  if (deadlineReached(nowMs, gDriftNextMs)) {
     EyeCommand cmd;
     cmd.panDeg = static_cast<float>(random(-200, 201)) / 100.0f;
     cmd.tiltDeg = static_cast<float>(random(-150, 151)) / 100.0f;
@@ -178,6 +181,9 @@ size_t gGreetingKeyframeCount = 0;
 size_t gGreetingIndex = 0;
 uint32_t gGreetingNextDueMs = 0;
 uint32_t gGreetingGeneration = 0;
+// True from a successful startGreeting() load until the sequence ends or is
+// superseded. Guarded by gGreetingMutex.
+bool gGreetingRunning = false;
 
 // Integration-pass fix (Phase 8): startGreeting()/loadGreetingSequence()
 // runs on the AsyncTCP/HTTP task (POST /api/playmodes/greeting/activate),
@@ -244,6 +250,7 @@ bool loadGreetingSequence() {
 void pushGreetingKeyframe(size_t index, uint32_t nowMs) {
   EyeCommand cmd = gGreetingKeyframes[index];
   cmd.source = CommandSource::PlayMode;
+  cmd.generation = gGreetingGeneration;
   CommandQueue::push(cmd);
   gGreetingNextDueMs = nowMs + cmd.durationMs;
 }
@@ -251,16 +258,31 @@ void pushGreetingKeyframe(size_t index, uint32_t nowMs) {
 void startGreeting(uint32_t nowMs); // fwd decl, activate() defined later in this file
 
 void greetingTick(uint32_t nowMs) {
-  if (nowMs < gGreetingNextDueMs) return;
+  if (!deadlineReached(nowMs, gGreetingNextDueMs)) return;
   if (xSemaphoreTake(gGreetingMutex, kGreetingTickMutexWaitTicks) != pdTRUE) {
     return; // startGreeting() is mid-(re)load on the HTTP task — try again next tick
   }
-  if (MotionTask::getCommandGeneration() != gGreetingGeneration) {
+  if (!gGreetingRunning) {
+    // Not loaded yet: activate() cleared the flag and startGreeting() hasn't
+    // captured the new generation yet — a generation mismatch seen in this
+    // window is not a supersede.
     xSemaphoreGive(gGreetingMutex);
-    return; // superseded (e.g. a Manual command mid-sequence) — stop pushing further keyframes
+    return;
+  }
+  if (MotionTask::getCommandGeneration() != gGreetingGeneration) {
+    // Superseded (a Manual command, API gesture, or calibration exit
+    // mid-sequence): stop pushing keyframes and settle into idle, as the
+    // sequence's normal end does. Deliberately not via activate(), whose
+    // generation bump would cancel whatever just took over.
+    gGreetingRunning = false;
+    gActiveMode = Mode::Idle;
+    startIdle(nowMs);
+    xSemaphoreGive(gGreetingMutex);
+    return;
   }
   size_t next = gGreetingIndex + 1;
   if (next >= gGreetingKeyframeCount) {
+    gGreetingRunning = false;
     xSemaphoreGive(gGreetingMutex);
     PlayModeManager::activate("idle"); // one-shot sequence finished — settle to idle (plan §5)
     return;
@@ -279,6 +301,7 @@ void startGreeting(uint32_t nowMs) {
   if (loaded) {
     gGreetingIndex = 0;
     gGreetingGeneration = MotionTask::getCommandGeneration();
+    gGreetingRunning = true;
     pushGreetingKeyframe(0, nowMs);
   }
   xSemaphoreGive(gGreetingMutex);
@@ -326,7 +349,7 @@ constexpr float kTrackingGazeRangeDeg = 45.0f;
 
 void startTracking(uint32_t nowMs) {
   gTrackingWasPresent = false;
-  gTrackingNextRetargetMs = 0;
+  gTrackingNextRetargetMs = nowMs; // due immediately (a 0 sentinel would not be wrap-safe)
   // Reuses idle's own drift/blink timers/behavior for the "no directional
   // target right now" baseline (LD2420, or LD2450 between detections).
   startIdle(nowMs);
@@ -354,7 +377,7 @@ void trackingTick(uint32_t nowMs) {
 
   if (primary != nullptr) {
     // LD2450-style real directional tracking.
-    if (nowMs >= gTrackingNextRetargetMs) {
+    if (deadlineReached(nowMs, gTrackingNextRetargetMs)) {
       float clampedAngle = *primary->angleDeg;
       if (clampedAngle > kTrackingGazeRangeDeg) clampedAngle = kTrackingGazeRangeDeg;
       if (clampedAngle < -kTrackingGazeRangeDeg) clampedAngle = -kTrackingGazeRangeDeg;
@@ -424,7 +447,7 @@ void begin() {
 }
 
 void tick(uint32_t nowMs) {
-  switch (gActiveMode) {
+  switch (gActiveMode.load()) {
     case Mode::Idle:
       idleTick(nowMs);
       break;
@@ -453,15 +476,21 @@ bool activate(const char *id) {
   }
   // Stop whatever the previous mode had in flight (plan §2/§5: switching
   // play mode cancels the sequencer's further enqueues) before starting
-  // the new one.
+  // the new one. The greeting flag is cleared first, under the greeting
+  // mutex, so a MotionTask tick landing between the bump below and a new
+  // startGreeting() capturing the new generation can't mistake that
+  // mismatch for a supersede (see greetingTick()).
+  xSemaphoreTake(gGreetingMutex, portMAX_DELAY);
+  gGreetingRunning = false;
+  xSemaphoreGive(gGreetingMutex);
   MotionTask::bumpCommandGeneration();
   gActiveMode = def->mode;
-  enterMode(gActiveMode, millis());
+  enterMode(def->mode, millis());
   return true;
 }
 
 const char *getActiveModeId() {
-  const ModeDef *def = findModeDef(gActiveMode);
+  const ModeDef *def = findModeDef(gActiveMode.load());
   return def != nullptr ? def->id : "manual";
 }
 

@@ -262,8 +262,34 @@ SemaphoreHandle_t gMutex = nullptr;
 void pushKeyframe(size_t index, uint32_t nowMs) {
   EyeCommand cmd = gActive->keyframes[index];
   cmd.source = gActiveSource;
+  // Pinned (not stamped at push time) so pushAbortRestore()'s generation
+  // match stays exact even if an HTTP bump lands mid-push.
+  cmd.generation = gCapturedGeneration;
   CommandQueue::push(cmd);
   gNextDueMs = nowMs + cmd.durationMs;
+}
+
+// Called when playback is aborted mid-gesture (commandGeneration moved on).
+// Without this, a blink aborted after its "close" keyframe would leave the
+// lids shut. Pushes the gesture's final keyframe (always its relax/baseline
+// frame, see the tables above), lids only, as a restore-only command
+// pinned to the aborted playback's generation: MotionTask applies it only
+// to lids nothing newer has claimed — a manual gaze command lets the lids
+// reopen, while a manual eyelid command or a sleep-mode close keeps them.
+void pushAbortRestore() {
+  if (gKeyframeIndex + 1 >= gActive->count) {
+    return; // final keyframe already pushed
+  }
+  EyeCommand cmd = gActive->keyframes[gActive->count - 1];
+  if (!cmd.lidUpperL && !cmd.lidLowerL && !cmd.lidUpperR && !cmd.lidLowerR) {
+    return; // gaze-only gesture, nothing to reopen
+  }
+  cmd.panDeg.reset();
+  cmd.tiltDeg.reset();
+  cmd.source = gActiveSource;
+  cmd.generation = gCapturedGeneration;
+  cmd.restoreOnly = true;
+  CommandQueue::push(cmd);
 }
 
 } // namespace
@@ -284,16 +310,20 @@ void tick(uint32_t nowMs) {
     xSemaphoreGive(gMutex);
     return;
   }
-  if (nowMs < gNextDueMs) {
-    xSemaphoreGive(gMutex);
-    return;
-  }
   // Something else (a Manual command, a new gesture trigger, or a
   // play-mode switch) has taken over since this playback started — stop
   // enqueueing the remaining keyframes rather than fighting for control
-  // (plan §2's commandGeneration mechanism).
+  // (plan §2's commandGeneration mechanism). Checked every tick, before the
+  // keyframe deadline: checking only at the deadline left the lids where
+  // the gesture had them for up to the rest of the current keyframe (e.g.
+  // sleepy's 1.2s hold) before the abort-restore reopened them.
   if (MotionTask::getCommandGeneration() != gCapturedGeneration) {
+    pushAbortRestore();
     gActive = nullptr;
+    xSemaphoreGive(gMutex);
+    return;
+  }
+  if (!deadlineReached(nowMs, gNextDueMs)) {
     xSemaphoreGive(gMutex);
     return;
   }
@@ -315,6 +345,9 @@ bool trigger(const char *id, CommandSource source) {
     return false;
   }
   xSemaphoreTake(gMutex, portMAX_DELAY);
+  if (gActive != nullptr) {
+    pushAbortRestore(); // the gesture being replaced may have left lids closed
+  }
   gActive = def;
   gActiveSource = source;
   gKeyframeIndex = 0;

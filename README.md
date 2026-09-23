@@ -33,6 +33,8 @@ The very first time it powers on (and any time its WiFi is "forgotten"), the dev
 3. Choose your home WiFi network from the list (or type its name), enter the password, and confirm.
 4. The device restarts and joins your home network. From then on, it's reachable on that network — check your router's device list for its name/IP address, or use network-discovery tools if you're not sure.
 
+If the device can't reach your WiFi (for example after the network name or password changed), it falls back to the `MagicEyes-Setup-XXXX` network above and keeps retrying your saved network every minute. You can also set the WiFi details over the USB cable: open a serial monitor at 115200 baud (e.g. PlatformIO's **Monitor**) and type `wifi set <network-name> "<password>"` (quotes are needed if the name or password contains spaces). Type `help` for the other commands, such as `wifi status`.
+
 ### 3. Open the control page
 
 Once it's on your home WiFi, open a browser (on your phone, tablet, or computer) and go to the device's address. You'll land on the home page, with two sections:

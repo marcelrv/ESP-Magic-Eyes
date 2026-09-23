@@ -22,6 +22,7 @@
 #include "hal/servo_hal.h"
 #include "motion/motion_task.h"
 #include "net/ota_manager.h"
+#include "net/serial_console.h"
 #include "net/web_server.h"
 #include "net/wifi_manager.h"
 #include "radar/radar_task.h"
@@ -100,10 +101,13 @@ void setup() {
   Serial.println(WifiManager::getModeName(WifiManager::getMode()));
   Serial.println("Phase 1 core infra + Phase 2 OTA + Phase 3 motion engine online.");
   Serial.println("========================================");
+
+  SerialConsole::begin();
 }
 
 void loop() {
   WifiManager::handle();
+  SerialConsole::handle(); // "wifi set ..." etc. — WiFi recovery with physical access
   OtaManager::handle();  // starts/stops + pumps ArduinoOTA, non-blocking
   OtaRoutes::handle();   // fires the deferred restart after a web OTA
   WifiRoutes::handle();  // fires the deferred restart after POST /api/wifi/forget

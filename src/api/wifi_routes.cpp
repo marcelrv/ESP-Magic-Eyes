@@ -60,8 +60,9 @@ void handleConnectBody(AsyncWebServerRequest *request, uint8_t *data, size_t len
   String ssid = reqDoc["ssid"].as<const char *>();
   String password = reqDoc["password"] | "";
 
-  // Non-blocking: WifiManager::connectToNetwork() saves creds to NVS,
-  // calls WiFi.begin(), and returns immediately — it does not wait for the
+  // Non-blocking: WifiManager::connectToNetwork() holds the creds as
+  // pending (saved to NVS only on success), calls WiFi.begin(), and returns
+  // immediately — it does not wait for the
   // connection outcome. The caller must poll GET /api/system/status's
   // wifiMode field to see STA_CONNECTING resolve to STA_CONNECTED or
   // STA_FAILED (bounded ~15s timeout, see wifi_manager.cpp).

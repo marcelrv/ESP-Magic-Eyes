@@ -47,15 +47,18 @@ struct AxisState {
   uint32_t startTimeMs = 0;
   uint32_t durationMs = 0; // 0 == already at targetValue
   Easing easing = Easing::Linear;
-  // Phase 4 addition: who owns this axis's in-flight interpolation. This
-  // is the "ownership" tag plan §2 describes for natural-mode coupling —
-  // deliberately no separate ownership bookkeeping beyond this plus the
-  // existing timing fields: an axis is "free" again for
-  // NaturalModeCoupler to touch once `now >= startTimeMs + durationMs`
-  // (its last interpolation has finished), regardless of what source set
-  // it, or immediately if `source == Natural` already (see
-  // maybeApplyNatural() below).
+  // Phase 4 addition: who owns this axis. This is the "ownership" tag
+  // plan §2 describes for natural-mode coupling. See maybeApplyNatural()
+  // below: a Natural-owned axis is always free, a Gesture/PlayMode-owned
+  // one is free once its interpolation has finished, and a Manual/
+  // Calibration-owned axis stays put (manual eyelid positions are sticky)
+  // until a gesture, play-mode command or the post-calibration rest pose
+  // retargets it.
   CommandSource source = CommandSource::Manual;
+  // commandGeneration of the command that last retargeted this axis — lets
+  // a restore-only command (EyeCommand::restoreOnly) tell whether anything
+  // newer has claimed the axis since.
+  uint32_t generation = 0;
 };
 
 AxisState gAxis[kAxisCount];
@@ -68,7 +71,11 @@ EyePose gCurrentPose; // only written by the motion task, under gPoseMutex
 // mechanism. Bumped from the AsyncTCP/HTTP task (API handlers) and
 // PlayModeManager::activate(); read from the MotionTask task
 // (GestureEngine/PlayModeManager's own coroutines).
-std::atomic<uint32_t> gCommandGeneration{0};
+// Starts at 1, not 0: EyeCommand::generation == 0 means "unset, stamp at
+// push time" (see eye_pose.h), so no real generation may ever be 0. The
+// counter would have to wrap all the way around (~4 billion bumps) to
+// reach 0 again.
+std::atomic<uint32_t> gCommandGeneration{1};
 
 // Calibration hold (see motion_task.h): millis() timestamp the hold
 // expires at, 0 == not held. Written from the AsyncTCP/HTTP task
@@ -109,6 +116,9 @@ float valueAt(const AxisState &axis, uint32_t nowMs) {
 // requirement: a new command always wins immediately, it never queues
 // behind whatever motion was already in flight. `source` tags who now
 // owns this axis (Phase 4 — see AxisState's comment above).
+// `generation` is left untouched by natural-mode coupling (it isn't a
+// command), so a gesture's abort-restore still recognizes lids that only
+// natural mode has nudged since.
 void retarget(AxisState &axis, float newTarget, uint32_t nowMs, uint32_t durationMs, Easing easing, CommandSource source) {
   float current = valueAt(axis, nowMs);
   axis.startValue = current;
@@ -119,19 +129,29 @@ void retarget(AxisState &axis, float newTarget, uint32_t nowMs, uint32_t duratio
   axis.source = source;
 }
 
+void applyAxis(AxisState &axis, const std::optional<float> &target, const EyeCommand &cmd, uint32_t nowMs) {
+  if (!target) return;
+  if (cmd.restoreOnly && axis.generation != cmd.generation) {
+    return; // something newer has claimed this axis — leave it alone
+  }
+  retarget(axis, *target, nowMs, cmd.durationMs, cmd.easing, cmd.source);
+  axis.generation = cmd.generation;
+}
+
 void applyCommand(const EyeCommand &cmd, uint32_t nowMs) {
-  if (cmd.panDeg) retarget(gAxis[idx(ServoId::Pan)], *cmd.panDeg, nowMs, cmd.durationMs, cmd.easing, cmd.source);
-  if (cmd.tiltDeg) retarget(gAxis[idx(ServoId::Tilt)], *cmd.tiltDeg, nowMs, cmd.durationMs, cmd.easing, cmd.source);
-  if (cmd.lidUpperL) retarget(gAxis[idx(ServoId::LidUpperL)], *cmd.lidUpperL, nowMs, cmd.durationMs, cmd.easing, cmd.source);
-  if (cmd.lidLowerL) retarget(gAxis[idx(ServoId::LidLowerL)], *cmd.lidLowerL, nowMs, cmd.durationMs, cmd.easing, cmd.source);
-  if (cmd.lidUpperR) retarget(gAxis[idx(ServoId::LidUpperR)], *cmd.lidUpperR, nowMs, cmd.durationMs, cmd.easing, cmd.source);
-  if (cmd.lidLowerR) retarget(gAxis[idx(ServoId::LidLowerR)], *cmd.lidLowerR, nowMs, cmd.durationMs, cmd.easing, cmd.source);
+  applyAxis(gAxis[idx(ServoId::Pan)], cmd.panDeg, cmd, nowMs);
+  applyAxis(gAxis[idx(ServoId::Tilt)], cmd.tiltDeg, cmd, nowMs);
+  applyAxis(gAxis[idx(ServoId::LidUpperL)], cmd.lidUpperL, cmd, nowMs);
+  applyAxis(gAxis[idx(ServoId::LidLowerL)], cmd.lidLowerL, cmd, nowMs);
+  applyAxis(gAxis[idx(ServoId::LidUpperR)], cmd.lidUpperR, cmd, nowMs);
+  applyAxis(gAxis[idx(ServoId::LidLowerR)], cmd.lidLowerR, cmd, nowMs);
 }
 
 // --- Natural-mode eyelid coupling (Phase 4, plan §5) --------------------
 // NOT pushed through CommandQueue — see natural_mode.h for why. Instead
 // this directly retargets a lid AxisState, and only when it's "free": not
-// currently owned by an in-flight Manual/Gesture/PlayMode interpolation
+// owned by an in-flight Gesture/PlayMode interpolation and not owned by a
+// Manual/Calibration command at all (manual lids are sticky)
 // (checked via AxisState.source + timing, no separate ownership
 // bookkeeping — see the AxisState comment above), and only when the
 // candidate target has actually moved enough to be worth a retarget (the
@@ -142,7 +162,9 @@ constexpr float kNaturalChangeThreshold = 0.02f;
 constexpr uint32_t kNaturalSmoothingMs = 200; // plan §5's ~150-250ms smoothing window
 
 void maybeApplyNatural(AxisState &axis, float candidateTarget, uint32_t nowMs) {
-  bool free = (axis.source == CommandSource::Natural) || (nowMs >= axis.startTimeMs + axis.durationMs);
+  bool finished = (nowMs - axis.startTimeMs) >= axis.durationMs; // wrap-safe, same form as valueAt()
+  bool autonomousOwner = axis.source == CommandSource::Gesture || axis.source == CommandSource::PlayMode;
+  bool free = (axis.source == CommandSource::Natural) || (autonomousOwner && finished);
   if (!free) {
     return;
   }
@@ -195,11 +217,15 @@ uint16_t normalizedToPulseUs(ServoId id, float normalized) {
 // that was mid-flight when calibration started and eases every axis back
 // to the rest pose, so autonomous motion resumes from a known state.
 void exitCalibrationHold(uint32_t nowMs) {
-  MotionTask::bumpCommandGeneration();
+  uint32_t generation = MotionTask::bumpCommandGeneration();
   const float targets[kAxisCount] = {0.0f, 0.0f, kRestLidOpenness, kRestLidOpenness, kRestLidOpenness,
                                      kRestLidOpenness};
   for (size_t i = 0; i < kAxisCount; ++i) {
-    retarget(gAxis[i], targets[i], nowMs, kHoldExitEaseMs, Easing::EaseInOut, CommandSource::Manual);
+    // Lids are handed back as Natural so natural-mode coupling resumes
+    // after calibration; Manual would make them sticky.
+    CommandSource source = isLidServo(static_cast<ServoId>(i)) ? CommandSource::Natural : CommandSource::Manual;
+    retarget(gAxis[i], targets[i], nowMs, kHoldExitEaseMs, Easing::EaseInOut, source);
+    gAxis[i].generation = generation;
   }
 }
 
@@ -298,7 +324,10 @@ void initAxis(AxisState &axis, float value, uint32_t nowMs) {
   axis.startTimeMs = nowMs;
   axis.durationMs = 0; // already "arrived" — valueAt() returns targetValue
   axis.easing = Easing::Linear;
-  axis.source = CommandSource::Manual; // arbitrary; durationMs==0 already makes it "free"
+  // Natural == "unclaimed": natural-mode coupling may take the lids from
+  // boot (Manual would make them sticky, see maybeApplyNatural()).
+  axis.source = CommandSource::Natural;
+  axis.generation = 0;
 }
 
 } // namespace

@@ -3,6 +3,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
+#include "motion/motion_task.h"
+
 namespace {
 
 // Small fixed depth — see command_queue.h: this is a "latest intent" pipe
@@ -22,9 +24,13 @@ void begin() {
   gQueue = xQueueCreate(kQueueDepth, sizeof(EyeCommand));
 }
 
-bool push(const EyeCommand &command) {
+bool push(const EyeCommand &commandIn) {
   if (gQueue == nullptr) {
     return false;
+  }
+  EyeCommand command = commandIn;
+  if (command.generation == 0) {
+    command.generation = MotionTask::getCommandGeneration();
   }
   if (xQueueSend(gQueue, &command, 0) == pdTRUE) {
     return true;

@@ -163,7 +163,10 @@ void handlePostConfigBody(AsyncWebServerRequest *request, uint8_t *data, size_t 
     cal.inverted = reqDoc["inverted"] | cal.inverted;
   }
 
-  NvsStore::setServoCalibration(id, cal);
+  if (!NvsStore::setServoCalibration(id, cal)) {
+    sendJsonError(request, 500, "nvs_write_failed");
+    return;
+  }
   ServoHal::reapplyCalibration(id); // takes effect immediately, no reboot
 
   JsonDocument doc;

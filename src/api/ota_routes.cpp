@@ -65,6 +65,15 @@ void handleOtaUploadChunk(AsyncWebServerRequest *request, const String &filename
     // Multipart body content-length includes headers/boundaries, not just
     // the file payload, so it isn't a reliable size hint here — always let
     // Update.h discover the end via end()/final instead.
+    //
+    // A previous upload whose client disconnected mid-transfer never got a
+    // `final` chunk, so its Update is still "running" — and Update.begin()
+    // refuses to start while one is, which would fail every later web OTA
+    // until a reboot. Abort that stale one first.
+    if (Update.isRunning()) {
+      Serial.println("[OTA] Aborting stale, unfinished update.");
+      Update.abort();
+    }
     if (!Update.begin(UPDATE_SIZE_UNKNOWN, updateCommand)) {
       gStatus.result = OtaResult::FAILURE;
       gStatus.errorString = Update.errorString();

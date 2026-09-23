@@ -89,7 +89,9 @@ bool loadLegacyTable(Preferences &prefs, const char *key, size_t storedBytes, Se
     return false;
   }
   Legacy legacy[N];
-  prefs.getBytes(key, legacy, storedBytes);
+  if (prefs.getBytes(key, legacy, storedBytes) != storedBytes) {
+    return true; // layout recognized but unreadable — keep `table`'s defaults
+  }
   for (size_t i = 0; i < N; ++i) {
     table[i] = migrateLegacy(legacy[i]);
   }
@@ -116,10 +118,14 @@ void loadServoCalTable(ServoCalibration (&table)[kServoCount]) {
   servoCalPrefs.end();
 }
 
-void saveServoCalTable(const ServoCalibration (&table)[kServoCount]) {
-  servoCalPrefs.begin(kServoCalNamespace, false);
-  servoCalPrefs.putBytes(kKeyServoCalTable, table, sizeof(ServoCalibration) * kServoCount);
+bool saveServoCalTable(const ServoCalibration (&table)[kServoCount]) {
+  constexpr size_t kTableBytes = sizeof(ServoCalibration) * kServoCount;
+  if (!servoCalPrefs.begin(kServoCalNamespace, false)) {
+    return false;
+  }
+  size_t written = servoCalPrefs.putBytes(kKeyServoCalTable, table, kTableBytes);
   servoCalPrefs.end();
+  return written == kTableBytes;
 }
 
 } // namespace
@@ -261,15 +267,15 @@ ServoCalibration getServoCalibration(ServoId id) {
   return table[i];
 }
 
-void setServoCalibration(ServoId id, const ServoCalibration &cal) {
+bool setServoCalibration(ServoId id, const ServoCalibration &cal) {
   size_t i = static_cast<size_t>(id);
   if (i >= kServoCount) {
-    return;
+    return false;
   }
   ServoCalibration table[kServoCount];
   loadServoCalTable(table);
   table[i] = cal;
-  saveServoCalTable(table);
+  return saveServoCalTable(table);
 }
 
 LedColorConfig getLedColorConfig() {

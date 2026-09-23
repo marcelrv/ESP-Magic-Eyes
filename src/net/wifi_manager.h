@@ -45,12 +45,24 @@ String getIpAddress();
 // AP SSID in use while in AP_SETUP mode, e.g. "MagicEyes-Setup-A1B2".
 String getApSsid();
 
-// Saves credentials to NVS and (re)attempts a connection. If currently in
-// AP_SETUP, the AP is left running (WIFI_AP_STA) so the captive portal
-// stays reachable while the new connection is attempted; on success the
-// AP is torn down. Intended for the future POST /api/wifi/connect
-// handler. Returns immediately (non-blocking); poll getMode() for result.
+// (Re)attempts a connection with these credentials, which are persisted to
+// NVS only once the attempt succeeds — a failed attempt leaves the
+// previously saved (last working) network in place for the fallback retry.
+// If currently in AP_SETUP, the AP is left running (WIFI_AP_STA) so the
+// captive portal stays reachable while the new connection is attempted; on
+// success the AP is torn down. Used by POST /api/wifi/connect. Returns
+// immediately (non-blocking); poll getMode() for result.
 void connectToNetwork(const String &ssid, const String &password);
+
+// Saves these credentials to NVS immediately, then connects with them.
+// Unlike connectToNetwork(), the save does not wait for success: this is
+// the serial console's recovery path (physical access, network possibly
+// unreachable right now). If the attempt fails, the fallback AP retries
+// these saved credentials every minute.
+void setCredentialsAndConnect(const String &ssid, const String &password);
+
+// SSID currently saved in NVS (empty if none).
+String getSavedSsid();
 
 // Clears saved credentials and reboots into AP setup mode. Intended for
 // the future POST /api/wifi/forget handler and the factory-reset button.

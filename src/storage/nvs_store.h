@@ -132,7 +132,9 @@ ServoCalibration getServoCalibration(ServoId id);
 // range, with LidUpperL and LidLowerR's closed/open swapped (mechanism
 // mounting reverses those two lids).
 ServoCalibration getDefaultServoCalibration(ServoId id);
-void setServoCalibration(ServoId id, const ServoCalibration &cal);
+// Returns false if the table could not be written to NVS (e.g. flash/NVS
+// full) — the previously saved calibration is then still in effect.
+bool setServoCalibration(ServoId id, const ServoCalibration &cal);
 
 // --- led namespace (Phase 6) -----------------------------------------------
 // Brightness/colorL/colorR/effect, packed as one blob (see LedColorConfig

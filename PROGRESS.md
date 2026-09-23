@@ -2382,3 +2382,86 @@ location down from real-hardware serial capture instead of guessing again.
     mid-calibration. The clear was unnecessary (an expired timestamp is
     inert) and is gone. MotionTask now logs "[Motion] Calibration hold
     started" / "ended (released|expired)" on serial.
+
+## PR #1 review fixes (2026-09-23)
+
+Fixes for the valid findings from a /code-review pass and CodeRabbit's
+review of PR #1. Both build envs (ld2420, ld2450) compile; not yet
+re-verified on hardware.
+
+- LD2450 sign decoding was inverted: the high bit set means *positive*
+  (manual's worked example: Y 0x86B1 -> +1713 mm, X 0x030E -> -782 mm;
+  matches ESPHome). Every forward target decoded with negative Y, so
+  tracking always slammed pan to +/-45. Speed is now converted cm/s -> mm/s.
+- Motion deadlines are wrap-safe (`deadlineReached()` in eye_pose.h):
+  play-mode/gesture timers used absolute `>=`/`<` compares, which break
+  when millis() wraps at ~49.7 days of uptime.
+- Superseded greeting (manual command / API gesture / calibration exit
+  mid-sequence) now settles into idle instead of sitting in "greeting"
+  forever doing nothing. A `gGreetingRunning` flag, cleared in activate()
+  before its generation bump, keeps a re-activation from misfiring it.
+- Manual eyelids are sticky: natural-mode coupling no longer reclaims a lid
+  owned by a Manual command (it used to snap back ~150ms after every
+  /api/eyes/eyelids call). Natural coupling resumes once a gesture,
+  play-mode command or the post-calibration rest pose (now tagged Natural)
+  retargets the lid. Axes also boot as Natural-owned.
+- Aborted gestures reopen the lids: EyeCommand/AxisState carry a
+  commandGeneration; on abort (or replacement) GestureEngine pushes the
+  gesture's final (relax) keyframe, lids only, as `restoreOnly`, which
+  MotionTask applies only to lids still owned by the aborted playback's
+  generation. A blink interrupted by a gaze command reopens; one
+  interrupted by an eyelid command or sleep mode does not. The generation
+  counter now starts at 1 (0 = "stamp at push time").
+- Web OTA aborts a stale, never-finalized Update (client disconnected
+  mid-upload) before Update.begin(); previously every later upload failed
+  until reboot.
+- WiFi connect credentials are held in RAM and saved to NVS only on
+  WL_CONNECTED; a mistyped password no longer destroys the last working
+  credentials (the fallback retry reconnects to the old network).
+- NVS: legacy calibration migration checks getBytes()'s length; a failed
+  calibration save returns false and POST /api/servos/config answers 500
+  `nvs_write_failed` instead of reporting success.
+- Not changed: CodeRabbit's native-struct NVS encoding comment (same
+  firmware/toolchain writes and reads the blobs; size-based layout
+  detection is already static_assert-guarded). OTA/API authentication
+  (web OTA routes, ArduinoOTA password) is deferred to a follow-up.
+
+## Hardware verification of review fixes + WiFi hardening (2026-09-23)
+
+Verified on the LD2420 device via web OTA: sticky manual eyelids,
+gesture abort-restore, eyelid command beating a restore, superseded
+greeting settling into idle, calibration-exit rest pose with natural
+coupling resuming, and web OTA recovering from an interrupted upload.
+Not hardware-testable here: LD2450 sign decoding, millis() wrap, NVS write
+failure.
+
+- **Gesture abort now immediate:** GestureEngine::tick() checked the
+  command generation only when the current keyframe's deadline arrived, so
+  an interrupted gesture held the lids for up to the rest of that keyframe
+  (sleepy's 1.2s hold) before the abort-restore reopened them. The check
+  now runs every tick; lids start reopening within one tick.
+- **WiFi: wrong password could be saved as "working"** (found by testing
+  POST /api/wifi/connect with a bad password on a connected device — twice
+  locked the device out). Right after WiFi.begin() on a connected device,
+  status() still reports the old link, and a momentary "connected" was also
+  observed before the router rejected the handshake. A connect attempt now
+  only succeeds when, continuously for 3s, the attempt got an IP
+  (ARDUINO_EVENT_WIFI_STA_GOT_IP, reset per attempt), status() is
+  WL_CONNECTED and esp_wifi_sta_get_ap_info() confirms association. The old
+  link is dropped explicitly before a new attempt.
+- **WiFi: lost-link fallback.** In STA_CONNECTED, 30s without a link (the
+  driver's auto-reconnect keeps trying meanwhile) now falls back to the
+  setup AP; from there the saved network is retried every 60s by taking
+  the AP down and connecting like boot does (plain WIFI_STA), when no
+  client is on the setup AP.
+- `WiFi.persistent(false)`: credentials live only in our NVS namespace,
+  not also in the WiFi driver's own flash config.
+- Serial logging of STA associate / got-IP / disconnect-reason events.
+- Verified: wrong password via the API -> device off-network, fell back,
+  retried and was back on the saved network after 83s; a reboot afterwards
+  reconnected with the (untouched) saved credentials.
+- **Serial console** (src/net/serial_console.*, 115200 baud): `help`,
+  `status`, `wifi [status]`, `wifi set <ssid> [password]` (quotes for
+  spaces; saves immediately — recovery path with physical access),
+  `wifi forget`, `reboot`. Verified on hardware (`wifi set` recovered the
+  device after the second lock-out).

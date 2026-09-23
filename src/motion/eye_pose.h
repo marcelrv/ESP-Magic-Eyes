@@ -68,4 +68,23 @@ struct EyeCommand {
   uint32_t durationMs = 200;
   Easing easing = Easing::EaseInOut;
   CommandSource source = CommandSource::Manual;
+
+  // MotionTask commandGeneration this command belongs to. 0 == "stamp at
+  // push time" — CommandQueue::push() fills in the current generation, so
+  // producers only set it explicitly when they must pin an older one
+  // (GestureEngine's abort-restore, below).
+  uint32_t generation = 0;
+  // Restore-only command: each set axis is retargeted only if the axis was
+  // last claimed by this same `generation` — i.e. nothing newer (a Manual
+  // command, a play-mode switch) has taken it over since. Used by
+  // GestureEngine to reopen lids after an aborted gesture without
+  // overriding whatever aborted it.
+  bool restoreOnly = false;
 };
+
+// Wrap-safe millis() deadline check: true once `nowMs` has reached
+// `dueMs`, correct across the 32-bit wrap (~49.7 days) as long as the two
+// are within ~24.8 days of each other.
+inline bool deadlineReached(uint32_t nowMs, uint32_t dueMs) {
+  return static_cast<int32_t>(nowMs - dueMs) >= 0;
+}
