@@ -80,7 +80,12 @@ std::atomic<bool> gGotIpThisAttempt{false};
 // (before the router's 4-way handshake rejected it), so a single sample is
 // not trusted.
 constexpr uint32_t kStaStableMs = 3000;
-uint32_t gLinkUpSinceMs = 0; // 0 == link not (continuously) up
+// Real millis() timestamps plus separate "timing" flags — not a 0 == idle
+// sentinel: `millis() | 1` could land 1ms in the future, and a same-ms
+// `millis() - since` then wrapped to ~4 billion, instantly satisfying the
+// stability/loss checks.
+bool gLinkUpTiming = false; // link continuously up since gLinkUpSinceMs
+uint32_t gLinkUpSinceMs = 0;
 
 // Once connected, how long the link may stay down (the WiFi driver's own
 // auto-reconnect keeps trying meanwhile) before this is treated as a
@@ -89,7 +94,8 @@ uint32_t gLinkUpSinceMs = 0; // 0 == link not (continuously) up
 // good (router gone, credentials changed) left the device "connected"
 // but unreachable forever.
 constexpr uint32_t kStaLostTimeoutMs = 30000;
-uint32_t gLinkDownSinceMs = 0; // 0 == link up
+bool gLinkDownTiming = false; // link continuously down since gLinkDownSinceMs
+uint32_t gLinkDownSinceMs = 0;
 
 // True only when the station is genuinely associated and has an IP for
 // the current attempt: WiFi.status(), our per-attempt IP flag, AND the
@@ -211,7 +217,7 @@ void beginStaConnect(const String &ssid, const String &password) {
     WiFi.disconnect(false);
   }
   gGotIpThisAttempt = false;
-  gLinkUpSinceMs = 0;
+  gLinkUpTiming = false;
 
   // If AP is currently active, stay in WIFI_AP_STA so the captive portal
   // remains reachable while this attempt is in flight; otherwise plain
@@ -254,16 +260,17 @@ void handle() {
   if (gMode == WifiMode::STA_CONNECTING) {
     bool stable = false;
     if (staLinkUp()) {
-      if (gLinkUpSinceMs == 0) {
-        gLinkUpSinceMs = millis() | 1; // never 0 while up
+      if (!gLinkUpTiming) {
+        gLinkUpTiming = true;
+        gLinkUpSinceMs = millis();
       }
       stable = millis() - gLinkUpSinceMs >= kStaStableMs;
     } else {
-      gLinkUpSinceMs = 0;
+      gLinkUpTiming = false;
     }
     if (stable) {
       gMode = WifiMode::STA_CONNECTED;
-      gLinkDownSinceMs = 0;
+      gLinkDownTiming = false;
       if (gHasPendingCreds) {
         NvsStore::saveWifiCredentials(gPendingSsid, gPendingPassword);
         gHasPendingCreds = false;
@@ -288,13 +295,14 @@ void handle() {
     }
   } else if (gMode == WifiMode::STA_CONNECTED) {
     if (WiFi.isConnected()) {
-      gLinkDownSinceMs = 0;
-    } else if (gLinkDownSinceMs == 0) {
-      gLinkDownSinceMs = millis() | 1;
+      gLinkDownTiming = false;
+    } else if (!gLinkDownTiming) {
+      gLinkDownTiming = true;
+      gLinkDownSinceMs = millis();
       Serial.println("[WiFi] Connection lost, waiting for auto-reconnect...");
     } else if (millis() - gLinkDownSinceMs > kStaLostTimeoutMs) {
       Serial.println("[WiFi] Connection lost for 30s, falling back to setup AP.");
-      gLinkDownSinceMs = 0;
+      gLinkDownTiming = false;
       gMode = WifiMode::STA_FAILED;
       gStaFailedAtMs = millis();
       WiFi.disconnect(true);
