@@ -92,6 +92,13 @@ bool holdActive(uint32_t nowMs) {
 constexpr float kRestLidOpenness = 0.85f;
 constexpr uint32_t kHoldExitEaseMs = 400;
 
+// Hold-exit pulse blend (see exitCalibrationHold()): per-axis difference
+// between the servo's last raw pulse and the pulse its re-synced axis value
+// maps to, faded out over kHoldExitEaseMs from gHoldExitStartMs.
+float gHoldExitOffsetUs[kAxisCount] = {};
+uint32_t gHoldExitStartMs = 0;
+bool gHoldExitBlending = false;
+
 size_t idx(ServoId id) { return static_cast<size_t>(id); }
 
 // Value of `axis` at time `nowMs`, without mutating it. Pure function of
@@ -213,20 +220,82 @@ uint16_t normalizedToPulseUs(ServoId id, float normalized) {
   return static_cast<uint16_t>(us + 0.5f);
 }
 
+// Inverse of degreesToPulseUs(): the gaze angle a pulse corresponds to,
+// clamped to the working range.
+float pulseUsToDegrees(ServoId id, uint16_t pulseUs) {
+  ServoCalibration cal = ServoHal::getCalibration(id);
+  float us = static_cast<float>(pulseUs);
+  float center = static_cast<float>(cal.centerUs);
+  float t = 0.0f;
+  if (us >= center && cal.maxUs > cal.centerUs) {
+    t = (us - center) / static_cast<float>(cal.maxUs - cal.centerUs);
+  } else if (us < center && cal.centerUs > cal.minUs) {
+    t = (us - center) / static_cast<float>(cal.centerUs - cal.minUs);
+  }
+  t = constrain(t, -1.0f, 1.0f);
+  if (cal.inverted) {
+    t = -t;
+  }
+  return t * kGazeRangeDeg;
+}
+
+// Inverse of normalizedToPulseUs(): the lid openness a pulse corresponds
+// to, clamped to 0..1.
+float pulseUsToNormalized(ServoId id, uint16_t pulseUs) {
+  ServoCalibration cal = ServoHal::getCalibration(id);
+  float us = static_cast<float>(pulseUs);
+  float closed = static_cast<float>(cal.closedUs);
+  float half = static_cast<float>(cal.halfUs);
+  float open = static_cast<float>(cal.openUs);
+  if (open < closed) {
+    // Mirror-mounted lid: flip so closed < half < open below.
+    us = -us;
+    closed = -closed;
+    half = -half;
+    open = -open;
+  }
+  if (us <= closed) return 0.0f;
+  if (us >= open) return 1.0f;
+  if (us <= half) return 0.5f * (us - closed) / (half - closed);
+  return 0.5f + 0.5f * (us - half) / (open - half);
+}
+
+// Axis value -> pulse, per axis kind.
+uint16_t axisToPulseUs(ServoId id, float value) {
+  return isLidServo(id) ? normalizedToPulseUs(id, value) : degreesToPulseUs(id, value);
+}
+
 // Called once on the tick a calibration hold ends: aborts any sequence
 // that was mid-flight when calibration started and eases every axis back
 // to the rest pose, so autonomous motion resumes from a known state.
+// The axes were frozen during the hold while the calibration page moved
+// the servos with raw pulses, so each one first re-syncs to where its
+// servo physically is — otherwise the first tick would snap it straight
+// back to the pre-hold pose before easing. A raw pulse can lie outside
+// what an axis value can express (past closedUs/openUs, or past the gaze
+// range), so the remaining difference is kept as a pulse offset that
+// motionTaskFn() fades out over the same ease: the first write lands
+// exactly on the raw pulse.
 void exitCalibrationHold(uint32_t nowMs) {
   uint32_t generation = MotionTask::bumpCommandGeneration();
   const float targets[kAxisCount] = {0.0f, 0.0f, kRestLidOpenness, kRestLidOpenness, kRestLidOpenness,
                                      kRestLidOpenness};
   for (size_t i = 0; i < kAxisCount; ++i) {
+    ServoId id = static_cast<ServoId>(i);
+    uint16_t pulseUs = ServoHal::getLastPulseUs(id);
+    float physical = isLidServo(id) ? pulseUsToNormalized(id, pulseUs) : pulseUsToDegrees(id, pulseUs);
+    gAxis[i].targetValue = physical;
+    gAxis[i].durationMs = 0; // valueAt() == physical, so retarget() eases from here
+    gHoldExitOffsetUs[i] = static_cast<float>(pulseUs) - static_cast<float>(axisToPulseUs(id, physical));
+
     // Lids are handed back as Natural so natural-mode coupling resumes
     // after calibration; Manual would make them sticky.
-    CommandSource source = isLidServo(static_cast<ServoId>(i)) ? CommandSource::Natural : CommandSource::Manual;
+    CommandSource source = isLidServo(id) ? CommandSource::Natural : CommandSource::Manual;
     retarget(gAxis[i], targets[i], nowMs, kHoldExitEaseMs, Easing::EaseInOut, source);
     gAxis[i].generation = generation;
   }
+  gHoldExitStartMs = nowMs;
+  gHoldExitBlending = true;
 }
 
 void motionTaskFn(void * /*param*/) {
@@ -303,12 +372,33 @@ void motionTaskFn(void * /*param*/) {
     pose.lidUpperR = valueAt(gAxis[idx(ServoId::LidUpperR)], now);
     pose.lidLowerR = valueAt(gAxis[idx(ServoId::LidLowerR)], now);
 
-    ServoHal::setPulseUs(ServoId::Pan, degreesToPulseUs(ServoId::Pan, pose.panDeg));
-    ServoHal::setPulseUs(ServoId::Tilt, degreesToPulseUs(ServoId::Tilt, pose.tiltDeg));
-    ServoHal::setPulseUs(ServoId::LidUpperL, normalizedToPulseUs(ServoId::LidUpperL, pose.lidUpperL));
-    ServoHal::setPulseUs(ServoId::LidLowerL, normalizedToPulseUs(ServoId::LidLowerL, pose.lidLowerL));
-    ServoHal::setPulseUs(ServoId::LidUpperR, normalizedToPulseUs(ServoId::LidUpperR, pose.lidUpperR));
-    ServoHal::setPulseUs(ServoId::LidLowerR, normalizedToPulseUs(ServoId::LidLowerR, pose.lidLowerR));
+    // Right after a calibration hold, fade out each servo's raw-pulse offset
+    // (see exitCalibrationHold()). Those writes may lie outside the saved
+    // [minUs, maxUs] (where the user's own raw pulse left the servo), so
+    // they go through setRawPulseUs(); every mapped pulse is inside that
+    // range, so the switch back to setPulseUs() at the end is seamless.
+    float offsetWeight = 0.0f;
+    if (gHoldExitBlending) {
+      uint32_t elapsed = now - gHoldExitStartMs;
+      if (elapsed >= kHoldExitEaseMs) {
+        gHoldExitBlending = false;
+      } else {
+        offsetWeight = 1.0f - applyEasing(Easing::EaseInOut,
+                                          static_cast<float>(elapsed) / static_cast<float>(kHoldExitEaseMs));
+      }
+    }
+    const float values[kAxisCount] = {pose.panDeg,    pose.tiltDeg,   pose.lidUpperL,
+                                      pose.lidLowerL, pose.lidUpperR, pose.lidLowerR};
+    for (size_t i = 0; i < kAxisCount; ++i) {
+      ServoId id = static_cast<ServoId>(i);
+      uint16_t us = axisToPulseUs(id, values[i]);
+      if (offsetWeight > 0.0f) {
+        float blended = static_cast<float>(us) + gHoldExitOffsetUs[i] * offsetWeight;
+        ServoHal::setRawPulseUs(id, static_cast<uint16_t>(blended + 0.5f));
+      } else {
+        ServoHal::setPulseUs(id, us);
+      }
+    }
 
     // Publish under a short critical section so getCurrentPose() (called
     // from the AsyncTCP/HTTP task) never observes a torn struct.

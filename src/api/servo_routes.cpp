@@ -39,18 +39,6 @@ const char *servoKind(ServoId id) {
   return "aux";
 }
 
-// Accumulates a possibly multi-chunk body into `buffer`; true once the
-// final chunk has arrived (ArBodyHandlerFunction may deliver the body in
-// more than one call).
-bool accumulateBody(String &buffer, uint8_t *data, size_t len, size_t index, size_t total) {
-  if (index == 0) {
-    buffer = "";
-    buffer.reserve(total);
-  }
-  buffer.concat(reinterpret_cast<const char *>(data), len);
-  return index + len == total;
-}
-
 void addCalibrationFields(JsonObject o, const ServoCalibration &cal) {
   o["minUs"] = cal.minUs;
   o["centerUs"] = cal.centerUs;
@@ -79,21 +67,10 @@ void handleGetConfig(AsyncWebServerRequest *request) {
 }
 
 // --- POST /api/servos/config -------------------------------------------
-// Body-buffer pattern matches rest_routes.cpp's handleSystemConfigBody:
-// ArBodyHandlerFunction may deliver the body in more than one chunk, so
-// it's accumulated here and only parsed once the final chunk arrives.
-String gConfigBodyBuffer;
-
 void handlePostConfigBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-  if (!accumulateBody(gConfigBodyBuffer, data, len, index, total)) {
-    return; // wait for the remaining chunk(s)
-  }
-
   JsonDocument reqDoc;
-  DeserializationError parseErr = deserializeJson(reqDoc, gConfigBodyBuffer);
-  if (parseErr) {
-    sendJsonError(request, 400, "invalid_json");
-    return;
+  if (!JsonHelpers::collectJsonBody(request, data, len, index, total, reqDoc)) {
+    return; // more chunks pending, or an error response was already sent
   }
 
   if (!reqDoc["servoId"].is<int>()) {
@@ -177,18 +154,11 @@ void handlePostConfigBody(AsyncWebServerRequest *request, uint8_t *data, size_t 
 }
 
 // --- POST /api/servos/test ----------------------------------------------
-String gTestBodyBuffer;
 
 void handlePostTestBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-  if (!accumulateBody(gTestBodyBuffer, data, len, index, total)) {
-    return;
-  }
-
   JsonDocument reqDoc;
-  DeserializationError parseErr = deserializeJson(reqDoc, gTestBodyBuffer);
-  if (parseErr) {
-    sendJsonError(request, 400, "invalid_json");
-    return;
+  if (!JsonHelpers::collectJsonBody(request, data, len, index, total, reqDoc)) {
+    return; // more chunks pending, or an error response was already sent
   }
 
   if (!reqDoc["servoId"].is<int>() || !reqDoc["pulseUs"].is<int>()) {
@@ -223,7 +193,6 @@ void handlePostTestBody(AsyncWebServerRequest *request, uint8_t *data, size_t le
 // --- GET/POST /api/servos/hold -------------------------------------------
 // {"enabled": true} starts/refreshes the calibration hold, {"enabled":
 // false} releases it (motion eases back to the rest pose).
-String gHoldBodyBuffer;
 
 void sendHoldState(AsyncWebServerRequest *request) {
   JsonDocument doc;
@@ -235,13 +204,9 @@ void sendHoldState(AsyncWebServerRequest *request) {
 }
 
 void handlePostHoldBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-  if (!accumulateBody(gHoldBodyBuffer, data, len, index, total)) {
-    return;
-  }
   JsonDocument reqDoc;
-  if (deserializeJson(reqDoc, gHoldBodyBuffer)) {
-    sendJsonError(request, 400, "invalid_json");
-    return;
+  if (!JsonHelpers::collectJsonBody(request, data, len, index, total, reqDoc)) {
+    return; // more chunks pending, or an error response was already sent
   }
   if (!reqDoc["enabled"].is<bool>()) {
     sendJsonError(request, 400, "missing_enabled");
@@ -259,16 +224,11 @@ void handlePostHoldBody(AsyncWebServerRequest *request, uint8_t *data, size_t le
 // {"pulses": [{"servoId": n, "pulseUs": us}, ...]} — several raw writes in
 // one request, so a reference pose (e.g. straight ahead + lids closed)
 // lands on all servos together. Validated fully before anything moves.
-String gPoseBodyBuffer;
 
 void handlePostPoseBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-  if (!accumulateBody(gPoseBodyBuffer, data, len, index, total)) {
-    return;
-  }
   JsonDocument reqDoc;
-  if (deserializeJson(reqDoc, gPoseBodyBuffer)) {
-    sendJsonError(request, 400, "invalid_json");
-    return;
+  if (!JsonHelpers::collectJsonBody(request, data, len, index, total, reqDoc)) {
+    return; // more chunks pending, or an error response was already sent
   }
   JsonArrayConst pulses = reqDoc["pulses"].as<JsonArrayConst>();
   if (pulses.isNull() || pulses.size() == 0) {

@@ -77,6 +77,12 @@ void startIdle(uint32_t nowMs) {
 }
 
 void idleTick(uint32_t nowMs) {
+  // Hold off while a gesture plays (e.g. tracking's presence "surprise"):
+  // a drift would override its gaze and a blink would replace it outright.
+  // Overdue timers simply fire once it finishes.
+  if (GestureEngine::isPlaying()) {
+    return;
+  }
   if (deadlineReached(nowMs, gDriftNextMs)) {
     EyeCommand cmd;
     cmd.panDeg = static_cast<float>(random(-800, 801)) / 100.0f;  // ±8.00°
@@ -101,6 +107,9 @@ void curiousTick(uint32_t nowMs) {
   // Fully code-parameterized (amplitude/frequency only, no JSON) — see
   // PROGRESS.md Phase 4 notes for why a full JSON-driven "curious"
   // behavior was judged out of scope for this phase.
+  if (GestureEngine::isPlaying()) {
+    return; // same as idleTick(): don't step on a playing gesture
+  }
   if (deadlineReached(nowMs, gDriftNextMs)) {
     EyeCommand cmd;
     cmd.panDeg = static_cast<float>(random(-3500, 3501)) / 100.0f;  // ±35°
@@ -320,7 +329,7 @@ void startGreeting(uint32_t nowMs) {
 // codebase) once per PlayModeManager tick.
 //
 // Two behaviors, chosen per-tick by whether any current target actually has
-// angle data — NOT by a RADAR_LD2420/RADAR_LD2450 #ifdef, so this logic
+// angle data — NOT by which radar type is configured, so this logic
 // stays correct regardless of which sensor is compiled in (and doesn't need
 // duplicating if a future sensor sits somewhere in between):
 //   - A target with angleDeg available (LD2450) -> real proportional

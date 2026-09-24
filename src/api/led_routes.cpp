@@ -34,13 +34,9 @@ void handleGetConfig(AsyncWebServerRequest *request) {
 }
 
 // --- POST /api/led/config -------------------------------------------------
-// Body-buffer pattern matches servo_routes.cpp/rest_routes.cpp:
-// ArBodyHandlerFunction may deliver the body in more than one chunk, so
-// it's accumulated here and only parsed once the final chunk arrives.
 // Partial update: the request may omit any field, in which case it keeps
 // its current value — the working copy starts from
 // LedController::getConfig(), not a fresh default-constructed LedConfig.
-String gConfigBodyBuffer;
 
 bool parseColorField(JsonVariantConst field, LedController::RgbColor &outColor, const char *&error) {
   if (!field["r"].is<int>() || !field["g"].is<int>() || !field["b"].is<int>()) {
@@ -59,20 +55,9 @@ bool parseColorField(JsonVariantConst field, LedController::RgbColor &outColor, 
 }
 
 void handlePostConfigBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-  if (index == 0) {
-    gConfigBodyBuffer = "";
-    gConfigBodyBuffer.reserve(total);
-  }
-  gConfigBodyBuffer.concat(reinterpret_cast<const char *>(data), len);
-  if (index + len != total) {
-    return; // wait for the remaining chunk(s)
-  }
-
   JsonDocument reqDoc;
-  DeserializationError parseErr = deserializeJson(reqDoc, gConfigBodyBuffer);
-  if (parseErr) {
-    sendJsonError(request, 400, "invalid_json");
-    return;
+  if (!JsonHelpers::collectJsonBody(request, data, len, index, total, reqDoc)) {
+    return; // more chunks pending, or an error response was already sent
   }
 
   LedController::LedConfig cfg = LedController::getConfig(); // partial-update base

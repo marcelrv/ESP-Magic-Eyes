@@ -21,12 +21,14 @@ The firmware is a complete, self-contained product: no hardcoded WiFi credential
 | Servo 5 — Right Upper Eyelid | 27 | LEDC via ESP32Servo |
 | Servo 6 — Right Lower Eyelid | 14 | LEDC via ESP32Servo |
 | Spare servo PWM (unused initially) | 13 | Reserved, exposed in API/config as "aux servo" |
-| Radar UART2 RX (ESP32 receives radar TX) | 16 | UART2 default pin, free on non-PSRAM WROOM-32 |
+| Radar UART2 RX (ESP32 receives radar serial out — LD2420 pad **OT2**) | 22 | See hardware erratum below |
 | Radar UART2 TX (ESP32 sends radar RX, if needed for config) | 17 | UART2 default pin |
 | RGB LED data (WS2812, single chain, 2 pixels: index 0 = left eye, index 1 = right eye) | 4 | Adafruit_NeoPixel; not wired in the initial build — code is present and safe with nothing connected, feature stays off (`ledEnabled=false`) until enabled in config |
 | WiFi/factory-reset trigger | 0 (BOOT button) | Hold 5s during normal run → clear NVS WiFi creds + reboot into AP setup mode. Standard dev-board button, no extra wiring. |
 
 Board: generic ESP32 WROOM-32 dev board (non-PSRAM), 4MB flash.
+
+**Hardware erratum — radar RX on GPIO22.** The original design put radar RX on GPIO16, but the first PCBA wired that line to the HLK-LD2420's **OT1** pad, which is only a high/low presence output. The module's actual UART output is on **OT2** (5-pin header: VCC, GND, OT1, RX, OT2). On that board a bodge wire runs from OT2 to GPIO22, and `include/pin_map.h` sets `RADAR_RX_PIN = 22`. A board built without the bodge (or a fixed PCB revision routing OT2 to GPIO16) needs `RADAR_RX_PIN` changed to match. `include/pin_map.h` is the source of truth; PROGRESS.md's "Bug 3" (RX/TX swapped to 17/16) was an earlier, superseded diagnosis.
 
 Open item for physical bring-up: confirm whether the ε-SERIES mechanism is "shared yoke" (one pan + one tilt servo move a shared eyeball carrier for both eyes, matching the pin table above) vs. fully independent per-eye pan/tilt. The motion-engine abstraction treats this as a config-level fact, not a code fork, so it's simple to adjust if the physical assembly differs.
 
@@ -58,7 +60,7 @@ Layered design:
                          │ RadarState (mutex-guarded)
 ┌───────────────────────┴────────────────────────────────────--┐
 │ Sensor & IO                                                     │
-│  - RadarTask (Core 0): UART parse (LD2420 or LD2450, build flag)│
+│  - RadarTask (Core 0): UART parse (LD2420/LD2450/none, NVS cfg) │
 │  - ServoHal (ESP32Servo wrapper), LedController (NeoPixel)      │
 │  - WifiManager (STA/AP + captive portal + NVS creds)            │
 │  - OtaManager (ArduinoOTA) + web multipart upload (ota_routes)  │
@@ -129,8 +131,9 @@ Base path `/api`. All bodies JSON (ArduinoJson v7 `JsonDocument` — v7 removed 
 - `GET /api/playmodes/active`
 
 **Radar**
-- `GET /api/radar/status` — sensor model compiled in, link state, last-seen timestamp
-- `GET /api/radar/latest` — last parsed reading; fields the active sensor can't provide (e.g. angle on LD2420) are simply absent rather than a placeholder value — the frontend adapts to whichever fields are present rather than branching on which firmware variant is running
+- `GET /api/radar/status` — configured sensor model (`LD2420`/`LD2450`/`NONE`), link state, last-seen timestamp
+- `GET/POST /api/radar/config` — `{type: "none"|"ld2420"|"ld2450", baudRate}` (baud applies to the LD2420 only); a POST saves to NVS and reboots
+- `GET /api/radar/latest` — last parsed reading; every target field is always present, and a field the active sensor can't provide (e.g. angle on LD2420) is JSON `null` rather than a placeholder value — the frontend adapts to whichever fields are present rather than branching on which radar type is configured
 
 **LED**
 - `GET/POST /api/led/config` `{enabled, brightness, colorL:{r,g,b}, colorR:{r,g,b}, effect}` — `effect` is one of `off`/`solid`/`breathe`
@@ -154,7 +157,7 @@ Base path `/api`. All bodies JSON (ArduinoJson v7 `JsonDocument` — v7 removed 
 - `curious` — larger randomized saccades + more frequent blinks; amplitude/frequency are parameterized in code rather than JSON-driven (a deliberate scope simplification — the ask for "data-driven, not hardcoded" behavior content is satisfied concretely by `greeting`'s JSON sequence below; fully data-driven curiosity behavior was judged disproportionate to this mode's value)
 - `sleep` — eases lids toward ~0.1-0.15 openness, motion nearly stops
 - `greeting` — one-shot scripted sequence loaded from `/sequences/greeting.json` on LittleFS (wake up → look at viewer → wide-eyed surprise → settle to idle) — proves sequence content is data-driven, not hardcoded, and can be edited/replaced without a firmware rebuild
-- `tracking` — reads `RadarState` each tick. With the **LD2450** build (angle/position available), issues damped (~300ms minimum retarget interval, to avoid nervous-looking jitter) proportional gaze-following toward the closest target with angle data, mapped to the ±45° pan/tilt convention. With the **LD2420** build (distance/presence only, no angle), there is no direction to follow, so tracking degrades to a presence-triggered "alert" glance (the `surprise` gesture) on a rising edge of presence, falling back to idle drift between events — exactly the "presence-triggered alert glance rather than true directional tracking" behavior anticipated in the original design for that sensor.
+- `tracking` — reads `RadarState` each tick. With an **LD2450** (angle/position available), issues damped (~300ms minimum retarget interval, to avoid nervous-looking jitter) proportional gaze-following toward the closest target with angle data, mapped to the ±45° pan/tilt convention. With an **LD2420** (distance/presence only, no angle), there is no direction to follow, so tracking degrades to a presence-triggered "alert" glance (the `surprise` gesture) on a rising edge of presence, falling back to idle drift between events — exactly the "presence-triggered alert glance rather than true directional tracking" behavior anticipated in the original design for that sensor. With no radar configured, `RadarTask::getState()` is always empty, so tracking behaves exactly like idle.
 - `manual` — no autonomous behavior; `/api/eyes/*` and `/api/gestures/*` always work regardless of active mode, but activating `manual` is the recommended mode for external integrations (phone/voice/vision AI) so nothing autonomous competes for `commandGeneration`.
 
 Switching play modes bumps `commandGeneration`, cleanly aborting any in-flight `PlayMode`-sourced gesture/sequence per §2's interruption mechanism.
@@ -165,12 +168,12 @@ Switching play modes bumps `commandGeneration`, cleanly aborting any in-flight `
 
 `IRadarSensor` interface (`src/radar/iradar_sensor.h`): `begin()`, `poll()` (called from `RadarTask`), and a mutex-guarded `getState() → RadarState{presence, targets:[{distanceMm, angleDeg?, xMm?, yMm?, speedMmS?}], lastUpdateMs}` — fields a sensor can't provide use `std::optional` (matching `EyeCommand`'s existing partial-field convention) rather than a magic-number placeholder.
 
-- **`Ld2420Sensor`** (`env:ld2420`, build flag `-D RADAR_LD2420`): built on **`gsieben/LD2420GeoGab @ 1.0.0`** — this library was directly inspected (not just taken on faith) during Phase 5 and found to be a genuine, well-documented HLK-LD2420 driver (the plan's originally-named `bolukan/ld2420` turned out, on inspection, to actually be a renamed LD2410 library fork, not LD2420, and was swapped out back in Phase 0). Distance/presence only, no angle — this limitation is surfaced honestly in both the `tracking` play mode (§5) and the radar visualization page rather than hidden. The driver's UART read is fully non-blocking/timeout-based so it degrades gracefully with no physical sensor connected.
-- **`Ld2450Sensor`** (`env:ld2450`, build flag `-D RADAR_LD2450`): a custom parser (no external library — the frame format is small and fully reverse-engineered), decoupled as a pure function (`parseLd2450Frame()`) from the UART I/O so it's testable independent of hardware. Frame: header `AA FF 03 00`, three 8-byte target blocks (X int16 LE, Y int16 LE, speed int16 LE, distance-resolution uint16 LE), footer `55 CC`, 256000 baud. **Sign decoding** (a documented gotcha in this protocol): a negative value is transmitted as `0x8000 + value` rather than two's-complement — decoded as `raw & 0x8000 ? -(int16_t)(raw & 0x7FFF) : (int16_t)raw`.
-- Selected via the existing build-time flag/environment split (not runtime-selectable) — swapping hardware means rebuilding and reflashing with the other PlatformIO environment.
+- **`Ld2420Sensor`**: built on **`gsieben/LD2420GeoGab @ 1.0.0`** — this library was directly inspected (not just taken on faith) during Phase 5 and found to be a genuine, well-documented HLK-LD2420 driver (the plan's originally-named `bolukan/ld2420` turned out, on inspection, to actually be a renamed LD2410 library fork, not LD2420, and was swapped out back in Phase 0). Distance/presence only, no angle — this limitation is surfaced honestly in both the `tracking` play mode (§5) and the radar visualization page rather than hidden. The driver's UART read is fully non-blocking/timeout-based so it degrades gracefully with no physical sensor connected.
+- **`Ld2450Sensor`**: a custom parser (no external library — the frame format is small and fully reverse-engineered), decoupled as a pure function (`parseLd2450Frame()`) from the UART I/O so it's testable independent of hardware. Frame: header `AA FF 03 00`, three 8-byte target blocks (X int16 LE, Y int16 LE, speed int16 LE, distance-resolution uint16 LE), footer `55 CC`, 256000 baud. **Sign decoding** (a documented gotcha in this protocol): a negative value is transmitted as `0x8000 + value` rather than two's-complement — decoded as `raw & 0x8000 ? -(int16_t)(raw & 0x7FFF) : (int16_t)raw`.
+- Selected at runtime: the radar type (`none`/`ld2420`/`ld2450`) is an NVS setting (`NvsStore::getRadarType()`, default `ld2420`) chosen on the Radar setup page. `RadarTask::begin()` reads it once at boot and allocates only that driver; with `none` it creates no sensor and no task, so nothing opens or polls the UART. Changing the type reboots the device. Both drivers are always compiled in (about 4 KB of flash), so there is a single firmware image.
 - `RadarTask`: Core 0, priority 1, ~30ms poll loop, mutex-guarded `RadarState` snapshot (same idiom as `MotionTask`'s pose snapshot).
 
-The radar test/visualization page (`setup/radar.html`) adapts its rendering to whichever fields are actually present in `/api/radar/latest`'s response, rather than hardcoding behavior per build variant.
+The radar test/visualization page (`setup/radar.html`) adapts its rendering to whichever fields are actually present in `/api/radar/latest`'s response, rather than hardcoding behavior per radar type.
 
 ---
 
@@ -228,7 +231,7 @@ Two 1.5MB OTA app slots, ~960KB LittleFS (as built, the frontend + data files us
 
 ```
 esp_magic_eyes/
-  platformio.ini          env:ld2420 and env:ld2450 (same board/libs, differing radar build flag)
+  platformio.ini          single env:esp32dev (radar type is a runtime setting)
   partitions.csv
   .vscode/                 PlatformIO-generated IDE config
   include/                 pin_map.h, version.h — shared headers
@@ -249,13 +252,15 @@ esp_magic_eyes/
 
 `platformio.ini` (as built):
 ```ini
-[env]
+[env:esp32dev]
 platform = espressif32
 board = esp32dev
 framework = arduino
 board_build.partitions = partitions.csv
 board_build.filesystem = littlefs
 monitor_speed = 115200
+build_unflags = -std=gnu++11
+build_flags = -std=gnu++17
 lib_deps =
   esp32async/AsyncTCP @ 3.5.0
   esp32async/ESPAsyncWebServer @ 3.12.1
@@ -263,14 +268,8 @@ lib_deps =
   adafruit/Adafruit NeoPixel @ 1.15.5
   bblanchon/ArduinoJson @ 7.4.3
   gsieben/LD2420GeoGab @ 1.0.0
-
-[env:ld2420]
-build_flags = -D RADAR_LD2420 -std=gnu++17
-
-[env:ld2450]
-build_flags = -D RADAR_LD2450 -std=gnu++17
 ```
-(The original ESP32Async/ESPAsyncWebServer packages are referenced in lowercase `esp32async/...` form as PlatformIO's registry resolved them; both are the actively-maintained fork of the long-unmaintained `me-no-dev/ESPAsyncWebServer`/`AsyncTCP`. `build_flags` does not merge between `[env]` and `[env:xxx]` on this PlatformIO version — an env section's own `build_flags` fully replaces rather than extends `[env]`'s, which is why `-std=gnu++17` is repeated per environment rather than set once.)
+(The original ESP32Async/ESPAsyncWebServer packages are referenced in lowercase `esp32async/...` form as PlatformIO's registry resolved them; both are the actively-maintained fork of the long-unmaintained `me-no-dev/ESPAsyncWebServer`/`AsyncTCP`.)
 
 ---
 
@@ -281,5 +280,5 @@ For whoever flashes a fresh board:
 2. Servo calibration: for each of the 7 channels, use `setup/calibration.html`'s test button to find safe min/center/max pulse widths for the physical mechanism, then save.
 3. Gestures and manual gaze control: verify each gesture button and the gaze pad produce the expected physical motion; adjust the pan/tilt ±45° convention or per-servo calibration if the physical range doesn't match.
 4. Natural mode: toggle on/off and visually confirm eyelids track gaze plausibly.
-5. Radar: with the physical LD2420 wired to GPIO16/17, confirm `setup/radar.html` shows presence detection; note that HLK-LD2420 firmware versions vary in UART baud rate (115200 vs. 256000) and TX/RX pin roles — verify against the specific module before assuming the driver's default settings are correct.
+5. Radar: with the physical LD2420 wired per `include/pin_map.h` (RX GPIO22 from OT2, TX GPIO17 — see the hardware erratum in §1), confirm `setup/radar.html` shows presence detection; note that HLK-LD2420 firmware versions vary in UART baud rate (115200 vs. 256000) and TX/RX pin roles — verify against the specific module before assuming the driver's default settings are correct.
 6. OTA: perform one web OTA update and one network (`pio run -t upload --upload-port <ip>`) OTA update to confirm both paths work before relying on them for future updates.

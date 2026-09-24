@@ -12,8 +12,9 @@
 // Routes registered:
 //   GET  /api/wifi/scan    — cached scan results
 //                             (WifiManager::getCachedScanResults()). The
-//                             scan itself only ever runs once, at boot,
-//                             before AP mode starts (see wifi_manager.cpp)
+//                             scan itself only runs before AP mode starts
+//                             (at boot, or on falling back to the AP — see
+//                             wifi_manager.cpp)
 //                             — this route does not trigger a fresh scan
 //                             and may return an empty/stale list; the
 //                             setup UI must offer a manual SSID entry

@@ -19,10 +19,10 @@ You'll need a computer with [Visual Studio Code](https://code.visualstudio.com/)
 
 1. Open this project folder in VS Code.
 2. Connect the ESP32 board to your computer with a USB cable.
-3. In the PlatformIO sidebar, choose the **ld2420** build (this matches the radar sensor that ships with the kit) and click **Upload**.
+3. In the PlatformIO sidebar, click **Upload**.
 4. Also click **Upload Filesystem Image** once, so the built-in web pages get copied onto the device.
 
-If you ever upgrade to the newer LD2450 radar sensor, switch to the **ld2450** build instead and re-upload — everything else about the setup stays the same.
+The same firmware works with the kit's LD2420 radar sensor, the newer LD2450, or no radar at all. It assumes the kit's LD2420 until you choose otherwise on the **Radar test** page in Setup (the device reboots to switch).
 
 ### 2. Connect it to your WiFi
 
@@ -62,7 +62,7 @@ From the **Setup** section:
 
 - **WiFi** — reconnect to a different network, or "forget" the current one to reset back to the setup mode described above.
 - **Calibration** — teach the device where the eyes' key positions are (see [Calibrating the eyes](#calibrating-the-eyes) below). Do this once after first assembling the mechanism, and again if you ever notice a servo straining, the eyes not looking straight, or the eyelids not closing or matching.
-- **Radar test** — a live view of what the radar sensor is currently detecting, useful for checking it's wired correctly and positioned well.
+- **Radar test** — choose which radar sensor is fitted (or none), and see a live view of what it is currently detecting, useful for checking it's wired correctly and positioned well.
 - **Firmware update** — update the device's software over WiFi, without needing to reconnect it to a computer. (You can also always update it the original way, by reconnecting the USB cable and using PlatformIO, as in the initial setup.)
 - **LED (optional)** — once a glow light is wired in, turn it on/off and choose its color and brightness here.
 

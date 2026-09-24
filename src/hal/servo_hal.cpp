@@ -31,6 +31,10 @@ ServoCalibration gCalibration[kServoCount]; // cache, see getCalibration()
 // POST /api/servos/config.
 bool gAttached[kServoCount] = {}; // all false until begin()/attachIfNeeded() set them
 
+// Last pulse written per channel (see ServoHal::getLastPulseUs()), guarded
+// by gMutex like the writes themselves.
+uint16_t gLastPulseUs[kServoCount] = {};
+
 // Integration-pass fix (Phase 8): setPulseUs()/getCalibration() are called
 // every ~20ms from MotionTask's own task (motion_task.cpp's tick, once per
 // interpolated axis), while reapplyCalibration() is called from the
@@ -115,7 +119,8 @@ void begin() {
     }
 
     gServos[i].attach(kServoPins[i], kAbsMinUs, kAbsMaxUs);
-    gServos[i].writeMicroseconds(clampToCalibration(id, restPulseUs(id, gCalibration[i])));
+    gLastPulseUs[i] = clampToCalibration(id, restPulseUs(id, gCalibration[i]));
+    gServos[i].writeMicroseconds(gLastPulseUs[i]);
     gAttached[i] = true;
   }
 }
@@ -127,7 +132,8 @@ void setPulseUs(ServoId id, uint16_t us) {
   }
   xSemaphoreTake(gMutex, portMAX_DELAY);
   attachIfNeeded(id);
-  gServos[i].writeMicroseconds(clampToCalibration(id, us));
+  gLastPulseUs[i] = clampToCalibration(id, us);
+  gServos[i].writeMicroseconds(gLastPulseUs[i]);
   xSemaphoreGive(gMutex);
 }
 
@@ -138,7 +144,8 @@ void setRawPulseUs(ServoId id, uint16_t us) {
   }
   xSemaphoreTake(gMutex, portMAX_DELAY);
   attachIfNeeded(id);
-  gServos[i].writeMicroseconds(clampToAbsolute(us));
+  gLastPulseUs[i] = clampToAbsolute(us);
+  gServos[i].writeMicroseconds(gLastPulseUs[i]);
   xSemaphoreGive(gMutex);
 }
 
@@ -155,6 +162,17 @@ void reapplyCalibration(ServoId id) {
   gCalibration[i] = cal;
   attachIfNeeded(id); // POST /api/servos/config attaches Aux on demand too
   xSemaphoreGive(gMutex);
+}
+
+uint16_t getLastPulseUs(ServoId id) {
+  size_t i = idx(id);
+  if (i >= kServoCount) {
+    return 0;
+  }
+  xSemaphoreTake(gMutex, portMAX_DELAY);
+  uint16_t us = gLastPulseUs[i];
+  xSemaphoreGive(gMutex);
+  return us;
 }
 
 ServoCalibration getCalibration(ServoId id) {

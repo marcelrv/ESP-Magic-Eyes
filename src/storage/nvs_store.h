@@ -77,6 +77,17 @@ inline bool isLidServo(ServoId id) {
          id == ServoId::LidLowerR;
 }
 
+// Which radar module is fitted — a runtime setting rather than a build
+// variant, so one firmware image serves every board. Read once at boot by
+// RadarTask::begin(); None means RadarTask never starts (no UART, no
+// polling). Unset defaults to LD2420, the kit's sensor. Values are stored
+// as-is in NVS, so never renumber them.
+enum class RadarType : uint8_t {
+  None = 0,
+  LD2420 = 1,
+  LD2450 = 2,
+};
+
 namespace NvsStore {
 
 // Must be called once from setup() before any other NvsStore call.
@@ -114,10 +125,14 @@ void setOtaNetworkEnabled(bool enabled);
 // different speed during bring-up; now a runtime NVS value so the Radar
 // setup page can change it with just a device reboot. Default 115200
 // matches the library's own compiled-in default. Read by
-// Ld2420Sensor::begin() only (RADAR_LD2420 builds) — LD2450 uses a fixed
-// protocol baud, not a user-adjustable one.
+// Ld2420Sensor::begin() only — LD2450 uses a fixed protocol baud, not a
+// user-adjustable one.
 uint32_t getRadarBaudRate();
 void setRadarBaudRate(uint32_t baudRate);
+
+// Radar module type (RadarType, above).
+RadarType getRadarType();
+void setRadarType(RadarType type);
 
 // --- servocal namespace (Phase 3) -----------------------------------------
 // Returns defaults (see ServoCalibration above) if nothing has been saved

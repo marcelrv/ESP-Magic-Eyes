@@ -65,6 +65,12 @@ void setRawPulseUs(ServoId id, uint16_t us);
 // reboot. Does not move the servo.
 void reapplyCalibration(ServoId id);
 
+// Pulse width most recently written to `id` (by either setter, or the rest
+// pulse from begin()) — i.e. where the servo physically is. MotionTask
+// uses it to ease out of a calibration hold from the servo's real
+// position rather than its pre-hold pose.
+uint16_t getLastPulseUs(ServoId id);
+
 // Cheap accessor for the currently-applied (cached, not re-read from
 // NVS/flash) calibration — used by MotionTask every ~20ms tick for the
 // degrees/normalized -> pulse-us mapping, so the 50Hz loop never touches

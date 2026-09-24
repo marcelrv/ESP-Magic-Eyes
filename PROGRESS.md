@@ -2208,6 +2208,13 @@ location down from real-hardware serial capture instead of guessing again.
 
 ### Bug 3 — radar UART RX/TX swapped versus this PCBA's actual wiring
 
+> **Superseded (2026-09-22):** the real root cause was that the radar line
+> reached the module's OT1 presence pad, not its OT2 UART output. The fix is
+> a bodge wire from OT2 to GPIO22, with `RADAR_RX_PIN = 22` /
+> `RADAR_TX_PIN = 17`. See `include/pin_map.h` and the hardware erratum in
+> `architecture/ARCHITECTURE.md` §1. The 17/16 swap described below is no
+> longer in the code.
+
 - **Confirmed physical wiring:** the board booted cleanly after Bug 1/Bug 2's
   fixes (first clean boot on real hardware), and the user then confirmed
   this specific PCB assembly's radar header wires the HLK-LD2420 module's

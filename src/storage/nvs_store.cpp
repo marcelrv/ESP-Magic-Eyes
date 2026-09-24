@@ -2,6 +2,9 @@
 
 #include <Preferences.h>
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+
 namespace {
 
 constexpr const char *kWifiNamespace = "wifi";
@@ -18,6 +21,7 @@ constexpr const char *kKeyNaturalMode = "naturalMode";
 constexpr const char *kKeyLedEnabled = "ledEnabled";
 constexpr const char *kKeyOtaNetworkEnabled = "otaNetEn";
 constexpr const char *kKeyRadarBaud = "radarBaud";
+constexpr const char *kKeyRadarType = "radarType";
 constexpr const char *kKeyServoCalTable = "calTable";
 constexpr const char *kKeyLedConfig = "cfg";
 
@@ -31,6 +35,29 @@ Preferences wifiPrefs;
 Preferences systemPrefs;
 Preferences servoCalPrefs;
 Preferences ledPrefs;
+
+// NvsStore is called from several tasks — loop() (WifiManager, serial
+// console), the AsyncTCP task (every API route) and setup(). The shared
+// Preferences instances above carry per-open state (handle, started flag),
+// so two tasks interleaving begin()/get/end() on one of them corrupt each
+// other, and setServoCalibration()'s load-modify-save of the table could
+// lose a concurrent write. Every public function holds this for its whole
+// body. Created on first use, which happens in setup() (NvsStore::begin())
+// before any other task can call in.
+SemaphoreHandle_t gMutex = nullptr;
+
+class NvsLock {
+public:
+  NvsLock() {
+    if (gMutex == nullptr) {
+      gMutex = xSemaphoreCreateMutex();
+    }
+    xSemaphoreTake(gMutex, portMAX_DELAY);
+  }
+  ~NvsLock() { xSemaphoreGive(gMutex); }
+  NvsLock(const NvsLock &) = delete;
+  NvsLock &operator=(const NvsLock &) = delete;
+};
 
 // ServoCalibration layout saved by firmware before closedUs/openUs
 // existed. Lids then mapped normalized 0..1 across minUs..maxUs, reversed
@@ -133,6 +160,7 @@ bool saveServoCalTable(const ServoCalibration (&table)[kServoCount]) {
 namespace NvsStore {
 
 void begin() {
+  NvsLock lock;
   // Namespaces are opened/closed per-call below (Preferences is cheap to
   // open/close and this avoids holding two NVS handles open for the whole
   // app lifetime). begin() here just verifies NVS is reachable early and
@@ -146,6 +174,7 @@ void begin() {
 }
 
 WifiCredentials getWifiCredentials() {
+  NvsLock lock;
   WifiCredentials creds;
   wifiPrefs.begin(kWifiNamespace, true);
   creds.ssid = wifiPrefs.getString(kKeySsid, "");
@@ -156,6 +185,7 @@ WifiCredentials getWifiCredentials() {
 }
 
 void saveWifiCredentials(const String &ssid, const String &password) {
+  NvsLock lock;
   wifiPrefs.begin(kWifiNamespace, false);
   wifiPrefs.putString(kKeySsid, ssid);
   wifiPrefs.putString(kKeyPassword, password);
@@ -163,6 +193,7 @@ void saveWifiCredentials(const String &ssid, const String &password) {
 }
 
 void clearWifiCredentials() {
+  NvsLock lock;
   wifiPrefs.begin(kWifiNamespace, false);
   wifiPrefs.remove(kKeySsid);
   wifiPrefs.remove(kKeyPassword);
@@ -170,6 +201,7 @@ void clearWifiCredentials() {
 }
 
 String getHostname() {
+  NvsLock lock;
   wifiPrefs.begin(kWifiNamespace, true);
   String hostname = wifiPrefs.getString(kKeyHostname, kDefaultHostname);
   wifiPrefs.end();
@@ -177,12 +209,14 @@ String getHostname() {
 }
 
 void setHostname(const String &hostname) {
+  NvsLock lock;
   wifiPrefs.begin(kWifiNamespace, false);
   wifiPrefs.putString(kKeyHostname, hostname);
   wifiPrefs.end();
 }
 
 String getDeviceName() {
+  NvsLock lock;
   systemPrefs.begin(kSystemNamespace, true);
   String name = systemPrefs.getString(kKeyDeviceName, kDefaultDeviceName);
   systemPrefs.end();
@@ -190,12 +224,14 @@ String getDeviceName() {
 }
 
 void setDeviceName(const String &name) {
+  NvsLock lock;
   systemPrefs.begin(kSystemNamespace, false);
   systemPrefs.putString(kKeyDeviceName, name);
   systemPrefs.end();
 }
 
 bool getNaturalModeEnabled() {
+  NvsLock lock;
   systemPrefs.begin(kSystemNamespace, true);
   bool enabled = systemPrefs.getBool(kKeyNaturalMode, true);
   systemPrefs.end();
@@ -203,12 +239,14 @@ bool getNaturalModeEnabled() {
 }
 
 void setNaturalModeEnabled(bool enabled) {
+  NvsLock lock;
   systemPrefs.begin(kSystemNamespace, false);
   systemPrefs.putBool(kKeyNaturalMode, enabled);
   systemPrefs.end();
 }
 
 bool getLedEnabled() {
+  NvsLock lock;
   systemPrefs.begin(kSystemNamespace, true);
   bool enabled = systemPrefs.getBool(kKeyLedEnabled, false);
   systemPrefs.end();
@@ -216,12 +254,14 @@ bool getLedEnabled() {
 }
 
 void setLedEnabled(bool enabled) {
+  NvsLock lock;
   systemPrefs.begin(kSystemNamespace, false);
   systemPrefs.putBool(kKeyLedEnabled, enabled);
   systemPrefs.end();
 }
 
 bool getOtaNetworkEnabled() {
+  NvsLock lock;
   systemPrefs.begin(kSystemNamespace, true);
   bool enabled = systemPrefs.getBool(kKeyOtaNetworkEnabled, true);
   systemPrefs.end();
@@ -229,12 +269,14 @@ bool getOtaNetworkEnabled() {
 }
 
 void setOtaNetworkEnabled(bool enabled) {
+  NvsLock lock;
   systemPrefs.begin(kSystemNamespace, false);
   systemPrefs.putBool(kKeyOtaNetworkEnabled, enabled);
   systemPrefs.end();
 }
 
 uint32_t getRadarBaudRate() {
+  NvsLock lock;
   systemPrefs.begin(kSystemNamespace, true);
   uint32_t baud = systemPrefs.getUInt(kKeyRadarBaud, kDefaultRadarBaud);
   systemPrefs.end();
@@ -242,8 +284,27 @@ uint32_t getRadarBaudRate() {
 }
 
 void setRadarBaudRate(uint32_t baudRate) {
+  NvsLock lock;
   systemPrefs.begin(kSystemNamespace, false);
   systemPrefs.putUInt(kKeyRadarBaud, baudRate);
+  systemPrefs.end();
+}
+
+RadarType getRadarType() {
+  NvsLock lock;
+  systemPrefs.begin(kSystemNamespace, true);
+  uint8_t raw = systemPrefs.getUChar(kKeyRadarType, static_cast<uint8_t>(RadarType::LD2420));
+  systemPrefs.end();
+  if (raw > static_cast<uint8_t>(RadarType::LD2450)) {
+    return RadarType::LD2420; // unknown/corrupt value — fall back to the default
+  }
+  return static_cast<RadarType>(raw);
+}
+
+void setRadarType(RadarType type) {
+  NvsLock lock;
+  systemPrefs.begin(kSystemNamespace, false);
+  systemPrefs.putUChar(kKeyRadarType, static_cast<uint8_t>(type));
   systemPrefs.end();
 }
 
@@ -258,6 +319,7 @@ ServoCalibration getDefaultServoCalibration(ServoId id) {
 }
 
 ServoCalibration getServoCalibration(ServoId id) {
+  NvsLock lock;
   size_t i = static_cast<size_t>(id);
   if (i >= kServoCount) {
     return ServoCalibration{};
@@ -268,6 +330,7 @@ ServoCalibration getServoCalibration(ServoId id) {
 }
 
 bool setServoCalibration(ServoId id, const ServoCalibration &cal) {
+  NvsLock lock;
   size_t i = static_cast<size_t>(id);
   if (i >= kServoCount) {
     return false;
@@ -279,6 +342,7 @@ bool setServoCalibration(ServoId id, const ServoCalibration &cal) {
 }
 
 LedColorConfig getLedColorConfig() {
+  NvsLock lock;
   LedColorConfig cfg; // defaults (see nvs_store.h)
   ledPrefs.begin(kLedNamespace, true);
   size_t storedBytes = ledPrefs.getBytesLength(kKeyLedConfig);
@@ -290,6 +354,7 @@ LedColorConfig getLedColorConfig() {
 }
 
 void setLedColorConfig(const LedColorConfig &cfg) {
+  NvsLock lock;
   ledPrefs.begin(kLedNamespace, false);
   ledPrefs.putBytes(kKeyLedConfig, &cfg, sizeof(LedColorConfig));
   ledPrefs.end();

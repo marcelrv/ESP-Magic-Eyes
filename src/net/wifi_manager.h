@@ -11,6 +11,8 @@
 
 #include <Arduino.h>
 
+#include <vector>
+
 enum class WifiMode {
   AP_SETUP,       // Serving a local AP + captive portal, no STA creds or STA failed
   STA_CONNECTING, // Attempting STA connect, within the timeout window
@@ -71,7 +73,8 @@ void forgetNetwork();
 // Optional scan-for-SSID-list support (plan §4 GET /api/wifi/scan). A
 // single scan is run once at boot, before AP is brought up (per research
 // finding: avoid scanning while AP is already active), and cached here.
-// Returns the cached results; may be empty if no scan has run yet.
-const WifiScanResult *getCachedScanResults(size_t &countOut);
+// Returns a copy of the cached results (safe to call from any task); may be
+// empty if no scan has run yet.
+std::vector<WifiScanResult> getCachedScanResults();
 
 } // namespace WifiManager

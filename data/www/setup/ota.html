@@ -122,14 +122,18 @@
     });
   }
 
+  // The upload response already confirmed success; this only waits for the
+  // device to come back. OTA status lives in RAM: it reads "success" until
+  // the reboot and "none" only after it, so "none" is the back-online
+  // signal (a failed poll alone could be a network blip before the reboot).
   function pollOtaStatus() {
     var stop = Api.pollEvery(function () {
       return Api.getOtaStatus().then(function (s) {
-        if (s.result === 'success') {
-          showMsg('Update applied. Device has rebooted (or is rebooting). Reload this page once it is back online.', 'ok');
-          stop();
-        } else if (s.result === 'failure') {
+        if (s.result === 'failure') {
           showMsg('Update failed: ' + (s.error || 'unknown error'), 'error');
+          stop();
+        } else if (s.result === 'none') {
+          showMsg('Update applied and the device is back online. Reload this page to see the new version.', 'ok');
           stop();
         }
       });

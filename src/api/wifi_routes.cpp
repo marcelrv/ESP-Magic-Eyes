@@ -16,41 +16,23 @@ using JsonHelpers::sendJsonError;
 // --- GET /api/wifi/scan ----------------------------------------------------
 
 void handleScan(AsyncWebServerRequest *request) {
-  size_t count = 0;
-  const WifiScanResult *results = WifiManager::getCachedScanResults(count);
+  std::vector<WifiScanResult> results = WifiManager::getCachedScanResults();
   JsonDocument doc;
   JsonArray arr = doc["results"].to<JsonArray>();
-  for (size_t i = 0; i < count; ++i) {
+  for (const WifiScanResult &r : results) {
     JsonObject o = arr.add<JsonObject>();
-    o["ssid"] = results[i].ssid;
-    o["rssiDbm"] = results[i].rssiDbm;
-    o["secure"] = results[i].secure;
+    o["ssid"] = r.ssid;
+    o["rssiDbm"] = r.rssiDbm;
+    o["secure"] = r.secure;
   }
   sendJson(request, doc);
 }
 
 // --- POST /api/wifi/connect {ssid, password} --------------------------------
-// Body-buffer pattern matches every other POST route in this codebase
-// (servo_routes.cpp/eyes_routes.cpp/etc): ArBodyHandlerFunction may deliver
-// the body in more than one chunk, so it's accumulated here and only parsed
-// once the final chunk arrives.
-String gConnectBodyBuffer;
-
 void handleConnectBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-  if (index == 0) {
-    gConnectBodyBuffer = "";
-    gConnectBodyBuffer.reserve(total);
-  }
-  gConnectBodyBuffer.concat(reinterpret_cast<const char *>(data), len);
-  if (index + len != total) {
-    return; // wait for the remaining chunk(s)
-  }
-
   JsonDocument reqDoc;
-  DeserializationError parseErr = deserializeJson(reqDoc, gConnectBodyBuffer);
-  if (parseErr) {
-    sendJsonError(request, 400, "invalid_json");
-    return;
+  if (!JsonHelpers::collectJsonBody(request, data, len, index, total, reqDoc)) {
+    return; // more chunks pending, or an error response was already sent
   }
 
   if (!reqDoc["ssid"].is<const char *>() || strlen(reqDoc["ssid"].as<const char *>()) == 0) {

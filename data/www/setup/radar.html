@@ -46,6 +46,24 @@
   </div>
 
   <div class="card">
+    <h3>Radar module</h3>
+    <p class="small muted" style="margin-top:0;">
+      Which radar is fitted to this board. Choose &ldquo;None&rdquo; if there
+      is no radar &mdash; the device then stops listening for one entirely.
+      The &ldquo;watch for people&rdquo; play mode needs a radar; without one
+      it behaves like idle. Saving reboots the device.
+    </p>
+    <div class="row" style="gap:0.5rem;">
+      <select id="radar-type" style="flex:1;">
+        <option value="ld2420">HLK-LD2420 (presence + distance, ships with the kit)</option>
+        <option value="ld2450">HLK-LD2450 (position tracking)</option>
+        <option value="none">None (no radar fitted)</option>
+      </select>
+      <button class="btn btn-primary" id="type-save-btn">Save &amp; reboot</button>
+    </div>
+  </div>
+
+  <div class="card" id="baud-card">
     <h3>UART speed (LD2420 only)</h3>
     <p class="small muted" style="margin-top:0;">
       The sensor's baud rate depends on its own firmware version &mdash;
@@ -185,8 +203,7 @@
       }).join('<br>');
 
       // Adapt to whichever fields are actually present, per-target, rather
-      // than branching on build variant (LD2420 vs LD2450) — the same page
-      // must work unmodified against either firmware.
+      // than branching on the radar type (LD2420 vs LD2450).
       var hasPosition = targets.some(function (t) {
         return (t.xMm !== null && t.xMm !== undefined) || (t.angleDeg !== null && t.angleDeg !== undefined);
       });
@@ -237,10 +254,25 @@
   }, 2000, function (err) { console.warn('radar status poll failed', err); });
 
   var baudSelect = document.getElementById('radar-baud');
+  var typeSelect = document.getElementById('radar-type');
   Api.getRadarConfig().then(function (cfg) {
     baudSelect.value = String(cfg.baudRate);
+    typeSelect.value = cfg.type;
+    // Baud only applies to the LD2420 that's actually running.
+    document.getElementById('baud-card').classList.toggle('hidden', cfg.activeType !== 'ld2420');
+    if (cfg.activeType === 'none') {
+      showMsg('No radar configured. Pick the fitted module above to enable it.', 'info');
+    }
   }).catch(function (err) {
     showMsg('Could not load radar config: ' + err.message, 'error');
+  });
+
+  document.getElementById('type-save-btn').addEventListener('click', function () {
+    var btn = this;
+    btn.disabled = true;
+    Api.setRadarConfig({ type: typeSelect.value })
+      .then(function () { showMsg('Saved. Device is rebooting to switch radar module…', 'ok'); })
+      .catch(function (err) { showMsg('Save failed: ' + err.message, 'error'); btn.disabled = false; });
   });
 
   document.getElementById('baud-save-btn').addEventListener('click', function () {

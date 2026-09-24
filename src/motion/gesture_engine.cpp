@@ -357,7 +357,14 @@ bool trigger(const char *id, CommandSource source) {
   return true;
 }
 
-bool isPlaying() { return gActive != nullptr; }
+bool isPlaying() {
+  // Under gMutex like every other gActive access: trigger() writes it from
+  // the HTTP task while MotionTask reads it here.
+  xSemaphoreTake(gMutex, portMAX_DELAY);
+  bool playing = gActive != nullptr;
+  xSemaphoreGive(gMutex);
+  return playing;
+}
 
 size_t listGestures(GestureInfo *outArray, size_t maxCount) {
   size_t n = kGestureCount < maxCount ? kGestureCount : maxCount;

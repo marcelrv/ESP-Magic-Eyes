@@ -43,7 +43,8 @@ constexpr uint8_t kServoPins[static_cast<size_t>(ServoId::Count)] = {
 };
 
 // --- Radar (HLK-LD2420 or HLK-LD2450, UART2) --------------------------
-// UART2 default pins on non-PSRAM WROOM-32, free for this use.
+// Originally the UART2 default pins (RX 16 / TX 17); RX moved to GPIO22 —
+// see below and the hardware erratum in architecture/ARCHITECTURE.md §1.
 //
 // Root cause found (bring-up, 2026-09-22): the physical board had ESP32
 // RX wired to the module's OT1 pad — a simple high/low presence output,

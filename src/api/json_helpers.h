@@ -43,15 +43,24 @@ void sendJson(AsyncWebServerRequest *request, const JsonDocument &doc);
 // application/json response.
 void sendJsonError(AsyncWebServerRequest *request, int code, const char *error);
 
+// Largest JSON request body collectJsonBody() accepts.
+constexpr size_t kMaxJsonBodyBytes = 4096;
+
+// Call from a route's onBody handler with its arguments. Accumulates the
+// (possibly multi-chunk) body in a buffer owned by this request
+// (request->_tempObject), and returns true once the whole body has arrived
+// and parsed into `doc`. Returns false while more chunks are pending, and
+// also after it has sent an error response itself (chunked/oversized body,
+// out of memory, invalid JSON) — the caller just returns in both cases.
+bool collectJsonBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total,
+                     JsonDocument &doc);
+
 // Use as the `onRequest` callback for a body-driven POST route, in place of
 // a no-op lambda. onRequest always fires after every onBody call for the
-// request has already completed (see header note above): if a body WAS
-// sent, the route's onBody handler has already sent the real response by
-// the time this runs, so this is a no-op in that case (checked via
-// `request->contentLength() == 0`, which is 0 only when no body was ever
-// declared/parsed for the request). If no body was sent at all, onBody
-// never ran and nothing has responded yet, so this sends a 400
-// "missing_body" response instead of leaving the request hanging forever.
+// request has already completed (see header note above). If a response has
+// already been set by then (the onBody handler answered), this is a no-op;
+// otherwise onBody never produced one (no body at all), so this sends a
+// 400 "missing_body" response instead of leaving the request hanging.
 void requireBody(AsyncWebServerRequest *request);
 
 } // namespace JsonHelpers
