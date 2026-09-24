@@ -1,0 +1,2 @@
+Phase 3 (motion engine): ServoHAL wrapper across the 7 servo pins, and
+Phase 6 (LED): LedController (NeoPixel) land here. See plan §9.

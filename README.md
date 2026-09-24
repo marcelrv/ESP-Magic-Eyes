@@ -33,6 +33,8 @@ The very first time it powers on (and any time its WiFi is "forgotten"), the dev
 3. Choose your home WiFi network from the list (or type its name), enter the password, and confirm.
 4. The device restarts and joins your home network. From then on, it's reachable on that network — check your router's device list for its name/IP address, or use network-discovery tools if you're not sure.
 
+If the device can't reach your WiFi (for example after the network name or password changed), it falls back to the `MagicEyes-Setup-XXXX` network above and keeps retrying your saved network every minute. You can also set the WiFi details over the USB cable: open a serial monitor at 115200 baud (e.g. PlatformIO's **Monitor**) and type `wifi set <network-name> "<password>"` (quotes are needed if the name or password contains spaces). Type `help` for the other commands, such as `wifi status`.
+
 ### 3. Open the control page
 
 Once it's on your home WiFi, open a browser (on your phone, tablet, or computer) and go to the device's address. You'll land on the home page, with two sections:
@@ -59,10 +61,31 @@ From the **Control** section:
 From the **Setup** section:
 
 - **WiFi** — reconnect to a different network, or "forget" the current one to reset back to the setup mode described above.
-- **Calibration** — for each of the 6 servos, nudge and test its range of motion until the physical eye mechanism moves smoothly and doesn't strain against its mechanical limits, then save. Do this once after first assembling the mechanism, and again if you ever notice a servo straining or not reaching its full range.
+- **Calibration** — teach the device where the eyes' key positions are (see [Calibrating the eyes](#calibrating-the-eyes) below). Do this once after first assembling the mechanism, and again if you ever notice a servo straining, the eyes not looking straight, or the eyelids not closing or matching.
 - **Radar test** — a live view of what the radar sensor is currently detecting, useful for checking it's wired correctly and positioned well.
 - **Firmware update** — update the device's software over WiFi, without needing to reconnect it to a computer. (You can also always update it the original way, by reconnecting the USB cable and using PlatformIO, as in the initial setup.)
 - **LED (optional)** — once a glow light is wired in, turn it on/off and choose its color and brightness here.
+
+## Calibrating the eyes
+
+Every mechanism is assembled slightly differently, so the device needs to be shown a few reference positions. Everything else — gaze movements, blinks, winks, sleep, natural-mode eyelids — is measured from these points, so it's worth doing carefully.
+
+Open **Setup → Calibration**. While this page is open, all automatic eye movement is paused, so each servo stays exactly where you put it. Every position is set with a slider (drag it, or use the **−10 / −1 / +1 / +10** buttons for fine tuning) and the servo moves live as you adjust it. Work through the steps in order, pressing that step's **Save** button when it looks right:
+
+1. **Look straight ahead** — adjust *Pan* and *Tilt* until both eyes look straight forward. Use **Check: look right / look up** to confirm the eyes move the right way; if one goes the wrong way, tick **Reversed** for it and save again.
+2. **Close the lids — just touching** — with the eyes straight ahead, move each of the four eyelids until the upper and lower lid of each eye *just touch*. Don't squeeze them together: this is the point blinks, winks and sleep close to, and pressing the lids against each other strains the servos.
+3. **Open the lids** — move each lid to its fully open position.
+4. **Half open — make both eyes match** — move each lid to half open so the left and right eye look identical. Eyelid linkages don't move evenly, and aren't identical left and right, so without this point in-between positions (such as the resting look in natural mode) can sit at different heights on each eye.
+5. **Safety limits** (advanced, optional) — hard limits the servos will never be driven past. Lid limits are widened automatically to include the points above.
+
+Handy while calibrating:
+
+- **Reference poses** (top of the page) move all servos at once to *straight + closed*, *half open*, *open* or *resting*, using the current slider values — including changes you haven't saved yet.
+- **Compare both eyes** sweeps all four eyelids together from closed to open. Both eyes should look the same at every position; if they drift apart somewhere, adjust the nearest calibration point (closed, half or open).
+
+When you're done, press **Resume motion** (or just leave the page — movement resumes automatically about 30 seconds later).
+
+> **Tip:** if the eyes ever twitch or jump back to a resting position while you calibrate, or the device drops off the network, open `http://<device-address>/api/system/info` — the `resetReason` field shows whether it restarted, and why (for example `brownout`, which usually points to a weak or shared servo power supply).
 
 ## Controlling it from something else
 

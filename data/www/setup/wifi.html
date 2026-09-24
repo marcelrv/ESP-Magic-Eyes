@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>WiFi Setup &mdash; Magic Eyes</title>
+<link rel="stylesheet" href="../css/app.css">
+</head>
+<body class="theme-setup">
+<header class="app-header">
+  <div class="app-header-row">
+    <div class="app-header-title">
+      <span class="eye-mark">&#128065;</span>
+      <h1>WiFi setup</h1>
+      <span class="mode-pill">Maintenance</span>
+    </div>
+    <a class="home-link" href="../index.html">&larr; Home</a>
+  </div>
+  <div class="setup-banner">&#9888; You are in setup mode &mdash; changes here affect network connectivity.</div>
+</header>
+<nav class="subnav">
+  <a class="active" href="wifi.html">WiFi</a>
+  <a href="calibration.html">Calibration</a>
+  <a href="radar.html">Radar</a>
+  <a href="ota.html">Firmware</a>
+  <a href="led.html">LED</a>
+</nav>
+
+<main class="container">
+
+  <div class="card">
+    <h3>Current connection</h3>
+    <div class="grid cols-2">
+      <div class="stat"><span class="stat-label">Mode</span><span class="stat-value" id="cur-mode">&mdash;</span></div>
+      <div class="stat"><span class="stat-label">IP address</span><span class="stat-value" id="cur-ip">&mdash;</span></div>
+    </div>
+  </div>
+
+  <div id="msg" class="msg hidden"></div>
+
+  <div class="card">
+    <h3>Connect to a network</h3>
+    <div class="field">
+      <label for="ssid-select">Nearby networks (scanned at boot)</label>
+      <select id="ssid-select">
+        <option value="">&mdash; select &mdash;</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="ssid-manual">Or enter SSID manually</label>
+      <input type="text" id="ssid-manual" placeholder="Network name">
+    </div>
+    <div class="field">
+      <label for="wifi-password">Password</label>
+      <input type="password" id="wifi-password" placeholder="Leave blank for open networks">
+    </div>
+    <button class="btn btn-primary btn-block" id="connect-btn">Connect</button>
+    <p class="small muted" id="connect-status" style="margin-top:0.5rem;"></p>
+  </div>
+
+  <div class="card">
+    <h3>Forget saved network</h3>
+    <p class="small muted">Clears the saved WiFi credentials and reboots the
+      device into its own setup access point. You will need to reconnect to
+      that access point to configure WiFi again.</p>
+    <button class="btn btn-danger btn-block" id="forget-btn">Forget network &amp; reboot</button>
+  </div>
+
+</main>
+
+<footer class="app-footer">ESP Magic Eyes &mdash; WiFi setup</footer>
+
+<script src="../js/api.js"></script>
+<script>
+(function () {
+  var msgEl = document.getElementById('msg');
+  function showMsg(text, kind) {
+    msgEl.textContent = text;
+    msgEl.className = 'msg msg-' + (kind || 'info');
+    msgEl.classList.remove('hidden');
+  }
+
+  function refreshStatus() {
+    return Api.getSystemStatus().then(function (status) {
+      document.getElementById('cur-mode').textContent = status.wifiMode || '—';
+      document.getElementById('cur-ip').textContent = status.ipAddress || '—';
+      return status;
+    });
+  }
+
+  refreshStatus().catch(function (err) { showMsg('Could not load status: ' + err.message, 'error'); });
+
+  Api.wifiScan().then(function (res) {
+    var select = document.getElementById('ssid-select');
+    var results = (res && res.results) || [];
+    if (!results.length) {
+      var opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'No scan results (use manual entry below)';
+      opt.disabled = true;
+      select.appendChild(opt);
+      return;
+    }
+    results
+      .slice()
+      .sort(function (a, b) { return (b.rssiDbm || -999) - (a.rssiDbm || -999); })
+      .forEach(function (r) {
+        var opt = document.createElement('option');
+        opt.value = r.ssid;
+        opt.textContent = r.ssid + ' (' + r.rssiDbm + ' dBm' + (r.secure ? ', secured' : ', open') + ')';
+        select.appendChild(opt);
+      });
+  }).catch(function (err) {
+    console.warn('WiFi scan unavailable:', err);
+  });
+
+  document.getElementById('ssid-select').addEventListener('change', function (e) {
+    if (e.target.value) {
+      document.getElementById('ssid-manual').value = e.target.value;
+    }
+  });
+
+  var connectBtn = document.getElementById('connect-btn');
+  var connectStatus = document.getElementById('connect-status');
+  var pollStop = null;
+
+  connectBtn.addEventListener('click', function () {
+    var ssid = document.getElementById('ssid-manual').value.trim();
+    var password = document.getElementById('wifi-password').value;
+    if (!ssid) {
+      showMsg('Enter or select an SSID first.', 'warn');
+      return;
+    }
+    connectBtn.disabled = true;
+    connectStatus.textContent = 'Sending connect request…';
+
+    Api.wifiConnect(ssid, password).then(function () {
+      connectStatus.textContent = 'Attempting to connect to "' + ssid + '"…';
+      if (pollStop) pollStop();
+      var attempts = 0;
+      pollStop = Api.pollEvery(function () {
+        attempts++;
+        return refreshStatus().then(function (status) {
+          if (status.wifiMode === 'STA_CONNECTED') {
+            connectStatus.textContent = 'Connected! IP: ' + status.ipAddress;
+            showMsg('Connected to "' + ssid + '".', 'ok');
+            connectBtn.disabled = false;
+            pollStop();
+          } else if (status.wifiMode === 'STA_FAILED') {
+            connectStatus.textContent = 'Connection failed or timed out.';
+            showMsg('Could not connect to "' + ssid + '". Falling back to setup AP.', 'error');
+            connectBtn.disabled = false;
+            pollStop();
+          } else if (attempts > 30) { // ~30s safety stop, beyond the device's own ~15s timeout
+            connectStatus.textContent = 'Still waiting… check the device.';
+            connectBtn.disabled = false;
+            pollStop();
+          }
+        });
+      }, 1000, function (err) { console.warn('status poll failed', err); });
+    }).catch(function (err) {
+      connectBtn.disabled = false;
+      showMsg('Connect request failed: ' + err.message, 'error');
+    });
+  });
+
+  document.getElementById('forget-btn').addEventListener('click', function () {
+    if (!confirm('This clears the saved WiFi network and reboots the device into setup mode. Continue?')) {
+      return;
+    }
+    var btn = this;
+    btn.disabled = true;
+    Api.wifiForget().then(function (res) {
+      showMsg((res && res.message) || 'Device is rebooting into setup mode.', 'warn');
+    }).catch(function (err) {
+      btn.disabled = false;
+      showMsg('Request failed: ' + err.message, 'error');
+    });
+  });
+})();
+</script>
+</body>
+</html>

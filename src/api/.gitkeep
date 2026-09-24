@@ -1,0 +1,2 @@
+Phase 1+ : rest_routes, ws_handler, json_helpers land here as REST/WS
+endpoints are implemented across phases. See plan §4 and §9.

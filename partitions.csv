@@ -1,0 +1,15 @@
+# Name,     Type, SubType,  Offset,   Size,     Flags
+#
+# NOTE: SubType for the "littlefs" partition is "spiffs", not "littlefs".
+# The pinned toolchain's esptoolpy (gen_esp32part.py) does not recognize
+# "littlefs" as a valid data SubType keyword (that keyword was added in a
+# later esptool/IDF release); "spiffs" is the standard, tool-compatible
+# label for a generic data/filesystem partition regardless of which
+# filesystem actually formats it. The active filesystem driver is still
+# LittleFS, selected via board_build.filesystem = littlefs in
+# platformio.ini — the SubType label here does not change that.
+nvs,        data, nvs,      0x9000,   0x5000,
+otadata,    data, ota,      0xe000,   0x2000,
+app0,       app,  ota_0,    0x10000,  0x180000,
+app1,       app,  ota_1,    0x190000, 0x180000,
+littlefs,   data, spiffs,   0x310000, 0xF0000,

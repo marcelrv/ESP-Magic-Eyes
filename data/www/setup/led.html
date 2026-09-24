@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LED Config &mdash; Magic Eyes</title>
+<link rel="stylesheet" href="../css/app.css">
+</head>
+<body class="theme-setup">
+<header class="app-header">
+  <div class="app-header-row">
+    <div class="app-header-title">
+      <span class="eye-mark">&#128065;</span>
+      <h1>LED</h1>
+      <span class="mode-pill">Maintenance</span>
+    </div>
+    <a class="home-link" href="../index.html">&larr; Home</a>
+  </div>
+  <div class="setup-banner">&#9888; Maintenance page.</div>
+</header>
+<nav class="subnav">
+  <a href="wifi.html">WiFi</a>
+  <a href="calibration.html">Calibration</a>
+  <a href="radar.html">Radar</a>
+  <a href="ota.html">Firmware</a>
+  <a class="active" href="led.html">LED</a>
+</nav>
+
+<main class="container">
+  <div class="msg msg-warn">No LED hardware is wired to the device yet
+    (feature-flagged, safe no-op). Changes below still save to the device
+    and will take visible effect once a WS2812 LED chain is connected.</div>
+
+  <div id="msg" class="msg hidden"></div>
+
+  <div class="card">
+    <div class="switch-row">
+      <h3 style="margin:0;">Enabled</h3>
+      <input type="checkbox" id="led-enabled">
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Brightness</h3>
+    <div class="slider-row" style="grid-template-columns: 1fr 3rem;">
+      <input type="range" id="led-brightness" min="0" max="255" step="1" value="128">
+      <span class="val" id="led-brightness-val">128</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Color</h3>
+    <div class="grid cols-2">
+      <div class="field">
+        <label for="led-colorL">Left eye</label>
+        <input type="color" id="led-colorL" value="#0078ff">
+      </div>
+      <div class="field">
+        <label for="led-colorR">Right eye</label>
+        <input type="color" id="led-colorR" value="#0078ff">
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Effect</h3>
+    <select id="led-effect">
+      <option value="off">Off</option>
+      <option value="solid">Solid</option>
+      <option value="breathe">Breathe</option>
+    </select>
+  </div>
+
+  <button class="btn btn-primary btn-block" id="save-btn">Save</button>
+</main>
+
+<footer class="app-footer">ESP Magic Eyes &mdash; LED config</footer>
+
+<script src="../js/api.js"></script>
+<script>
+(function () {
+  var msgEl = document.getElementById('msg');
+  function showMsg(text, kind) {
+    msgEl.textContent = text;
+    msgEl.className = 'msg msg-' + (kind || 'info');
+    msgEl.classList.remove('hidden');
+  }
+
+  function rgbToHex(c) {
+    function h(n) { return n.toString(16).padStart(2, '0'); }
+    return '#' + h(c.r) + h(c.g) + h(c.b);
+  }
+  function hexToRgb(hex) {
+    var n = parseInt(hex.replace('#', ''), 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  }
+
+  var brightnessInput = document.getElementById('led-brightness');
+  var brightnessVal = document.getElementById('led-brightness-val');
+  brightnessInput.addEventListener('input', function () {
+    brightnessVal.textContent = brightnessInput.value;
+  });
+
+  Api.getLedConfig().then(function (cfg) {
+    document.getElementById('led-enabled').checked = !!cfg.enabled;
+    brightnessInput.value = cfg.brightness;
+    brightnessVal.textContent = cfg.brightness;
+    document.getElementById('led-colorL').value = rgbToHex(cfg.colorL);
+    document.getElementById('led-colorR').value = rgbToHex(cfg.colorR);
+    document.getElementById('led-effect').value = cfg.effect;
+  }).catch(function (err) {
+    showMsg('Could not load LED config: ' + err.message, 'error');
+  });
+
+  document.getElementById('save-btn').addEventListener('click', function () {
+    var btn = this;
+    btn.disabled = true;
+    var cfg = {
+      enabled: document.getElementById('led-enabled').checked,
+      brightness: parseInt(brightnessInput.value, 10),
+      colorL: hexToRgb(document.getElementById('led-colorL').value),
+      colorR: hexToRgb(document.getElementById('led-colorR').value),
+      effect: document.getElementById('led-effect').value,
+    };
+    Api.setLedConfig(cfg)
+      .then(function () { showMsg('LED configuration saved.', 'ok'); })
+      .catch(function (err) { showMsg('Save failed: ' + err.message, 'error'); })
+      .finally(function () { btn.disabled = false; });
+  });
+})();
+</script>
+</body>
+</html>

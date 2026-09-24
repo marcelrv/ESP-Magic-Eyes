@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ESP Magic Eyes</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="app-header">
+  <div class="app-header-row">
+    <div class="app-header-title">
+      <span class="eye-mark">&#128065;</span>
+      <h1>Magic Eyes</h1>
+      <span id="mode-pill" class="mode-pill hidden"></span>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+
+  <!-- First-time / AP setup prompt -->
+  <section id="setup-prompt" class="card hidden">
+    <h2>First-time setup</h2>
+    <p>This device has no WiFi network configured yet and is running its own
+      setup access point. Connect it to your home network to get started.</p>
+    <a class="btn btn-primary btn-block" href="setup/wifi.html">Configure WiFi &rarr;</a>
+  </section>
+
+  <!-- Normal dashboard -->
+  <section id="dashboard" class="hidden">
+    <div class="card">
+      <h3>Status</h3>
+      <div class="grid cols-2">
+        <div class="stat">
+          <span class="stat-label">Connection</span>
+          <span class="stat-value" id="stat-wifi">&mdash;</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">IP address</span>
+          <span class="stat-value" id="stat-ip">&mdash;</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Play mode</span>
+          <span class="stat-value" id="stat-playmode">&mdash;</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Natural mode</span>
+          <span class="stat-value" id="stat-natural">&mdash;</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Radar</span>
+          <span class="stat-value" id="stat-radar">&mdash;</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Firmware</span>
+          <span class="stat-value" id="stat-fw">&mdash;</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Control</h3>
+      <div class="grid cols-2">
+        <a class="btn btn-block" href="control/manual.html">Manual gaze &amp; gestures</a>
+        <a class="btn btn-block" href="control/playmodes.html">Play modes</a>
+        <a class="btn btn-block" href="control/status.html">Live status</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Setup <span class="small muted">(maintenance)</span></h3>
+      <div class="grid cols-2">
+        <a class="btn btn-block" href="setup/wifi.html">WiFi</a>
+        <a class="btn btn-block" href="setup/calibration.html">Servo calibration</a>
+        <a class="btn btn-block" href="setup/radar.html">Radar test</a>
+        <a class="btn btn-block" href="setup/ota.html">Firmware update</a>
+        <a class="btn btn-block" href="setup/led.html">LED</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="load-error" class="card hidden">
+    <p class="msg msg-error">Could not reach the device API. If this page was
+      just loaded standalone (not from the device), that's expected. On the
+      device, check the serial log or try reloading.</p>
+  </section>
+
+</main>
+
+<footer class="app-footer">ESP Magic Eyes</footer>
+
+<script src="js/api.js"></script>
+<script>
+(function () {
+  function show(el) { el.classList.remove('hidden'); }
+  function hide(el) { el.classList.add('hidden'); }
+
+  var setupPrompt = document.getElementById('setup-prompt');
+  var dashboard = document.getElementById('dashboard');
+  var loadError = document.getElementById('load-error');
+  var modePill = document.getElementById('mode-pill');
+
+  Promise.all([Api.getSystemStatus(), Api.getSystemInfo()])
+    .then(function (results) {
+      var status = results[0], info = results[1];
+      hide(loadError);
+
+      if (status.wifiMode === 'AP_SETUP') {
+        show(setupPrompt);
+        hide(dashboard);
+        modePill.textContent = 'Setup mode';
+        show(modePill);
+        return;
+      }
+
+      show(dashboard);
+      hide(setupPrompt);
+
+      document.getElementById('stat-wifi').textContent = status.wifiMode || '—';
+      document.getElementById('stat-ip').textContent = status.ipAddress || '—';
+      document.getElementById('stat-playmode').textContent = status.playMode || '—';
+      document.getElementById('stat-natural').textContent = status.naturalMode ? 'on' : 'off';
+      document.getElementById('stat-radar').textContent = info.radarVariant || '—';
+      document.getElementById('stat-fw').textContent = info.firmwareVersion || '—';
+    })
+    .catch(function (err) {
+      show(loadError);
+      hide(dashboard);
+      hide(setupPrompt);
+      console.error('Failed to load device status:', err);
+    });
+})();
+</script>
+</body>
+</html>

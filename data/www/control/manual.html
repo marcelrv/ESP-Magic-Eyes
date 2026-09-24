@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Manual Control &mdash; Magic Eyes</title>
+<link rel="stylesheet" href="../css/app.css">
+</head>
+<body class="theme-control">
+<header class="app-header">
+  <div class="app-header-row">
+    <div class="app-header-title">
+      <span class="eye-mark">&#128065;</span>
+      <h1>Manual control</h1>
+    </div>
+    <a class="home-link" href="../index.html">&larr; Home</a>
+  </div>
+</header>
+<nav class="subnav">
+  <a class="active" href="manual.html">Manual</a>
+  <a href="playmodes.html">Play modes</a>
+  <a href="status.html">Status</a>
+</nav>
+
+<main class="container">
+
+  <div class="card">
+    <h3>Gaze</h3>
+    <div class="gaze-pad-wrap">
+      <div class="gaze-pad" id="gaze-pad">
+        <div class="center-cross"></div>
+        <div class="thumb" id="gaze-thumb"></div>
+      </div>
+    </div>
+    <p class="small muted" style="text-align:center; margin-top:0.5rem;">
+      Drag within the circle. Center = straight ahead, edge &asymp; &plusmn;45&deg;.
+    </p>
+    <p class="small mono" style="text-align:center;" id="gaze-readout">pan 0.0&deg; &nbsp; tilt 0.0&deg;</p>
+  </div>
+
+  <div class="card">
+    <h3>Eyelids</h3>
+    <div class="slider-row">
+      <label for="lid-upperL">Upper L</label>
+      <input type="range" id="lid-upperL" min="0" max="1" step="0.01" value="0.85">
+      <span class="val" id="lid-upperL-val">0.85</span>
+    </div>
+    <div class="slider-row">
+      <label for="lid-lowerL">Lower L</label>
+      <input type="range" id="lid-lowerL" min="0" max="1" step="0.01" value="0.85">
+      <span class="val" id="lid-lowerL-val">0.85</span>
+    </div>
+    <div class="slider-row">
+      <label for="lid-upperR">Upper R</label>
+      <input type="range" id="lid-upperR" min="0" max="1" step="0.01" value="0.85">
+      <span class="val" id="lid-upperR-val">0.85</span>
+    </div>
+    <div class="slider-row">
+      <label for="lid-lowerR">Lower R</label>
+      <input type="range" id="lid-lowerR" min="0" max="1" step="0.01" value="0.85">
+      <span class="val" id="lid-lowerR-val">0.85</span>
+    </div>
+    <p class="small muted">0 = closed, 1 = fully open. If natural mode is on,
+      these targets may be gently overridden by gaze-coupled coupling once
+      you stop adjusting.</p>
+  </div>
+
+  <div class="card">
+    <div class="row between">
+      <h3 style="margin:0;">Natural mode</h3>
+      <label class="switch-row" style="margin:0;">
+        <input type="checkbox" id="natural-toggle">
+      </label>
+    </div>
+    <p class="small muted" style="margin-top:0.5rem;">
+      When on, eyelids automatically follow gaze direction for a more organic
+      look. Turn off for fully manual eyelid control.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>Gestures</h3>
+    <div class="btn-group" id="gesture-list">
+      <span class="muted small">Loading gestures&hellip;</span>
+    </div>
+  </div>
+
+  <div id="msg" class="msg msg-info hidden"></div>
+
+</main>
+
+<footer class="app-footer">ESP Magic Eyes &mdash; manual control</footer>
+
+<script src="../js/api.js"></script>
+<script>
+(function () {
+  var GAZE_RANGE_DEG = 45; // matches MotionTask's documented pan/tilt working range
+
+  var pad = document.getElementById('gaze-pad');
+  var thumb = document.getElementById('gaze-thumb');
+  var readout = document.getElementById('gaze-readout');
+  var msgEl = document.getElementById('msg');
+
+  var dragging = false;
+  var suppressPoseUpdates = false;
+
+  function showMsg(text, kind) {
+    msgEl.textContent = text;
+    msgEl.className = 'msg msg-' + (kind || 'info');
+    msgEl.classList.remove('hidden');
+  }
+
+  function setThumbFromNormalized(nx, ny) {
+    // nx, ny in [-1, 1]; pad is a circle, radius 50%.
+    var pct = 50 + nx * 45;
+    var pctY = 50 + ny * 45;
+    thumb.style.left = pct + '%';
+    thumb.style.top = pctY + '%';
+  }
+
+  function updateReadout(panDeg, tiltDeg) {
+    readout.textContent = 'pan ' + panDeg.toFixed(1) + '°   tilt ' + tiltDeg.toFixed(1) + '°';
+  }
+
+  var sendGaze = Api.throttle(function (panDeg, tiltDeg) {
+    Api.setGaze({ pan: panDeg, tilt: tiltDeg, durationMs: 120, easing: 'easeInOut' })
+      .catch(function (err) { showMsg('Gaze command failed: ' + err.message, 'error'); });
+  }, 70); // ~14/sec while dragging
+
+  function handlePointer(clientX, clientY) {
+    var rect = pad.getBoundingClientRect();
+    var cx = rect.left + rect.width / 2;
+    var cy = rect.top + rect.height / 2;
+    var r = rect.width / 2;
+    var dx = (clientX - cx) / r;
+    var dy = (clientY - cy) / r;
+    var mag = Math.sqrt(dx * dx + dy * dy);
+    if (mag > 1) { dx /= mag; dy /= mag; }
+
+    setThumbFromNormalized(dx, dy);
+    var panDeg = dx * GAZE_RANGE_DEG;
+    var tiltDeg = -dy * GAZE_RANGE_DEG; // up on screen = positive tilt
+    updateReadout(panDeg, tiltDeg);
+    sendGaze(panDeg, tiltDeg);
+  }
+
+  pad.addEventListener('pointerdown', function (e) {
+    dragging = true;
+    suppressPoseUpdates = true;
+    pad.setPointerCapture(e.pointerId);
+    handlePointer(e.clientX, e.clientY);
+  });
+  pad.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    handlePointer(e.clientX, e.clientY);
+  });
+  function endDrag(e) {
+    if (!dragging) return;
+    dragging = false;
+    setTimeout(function () { suppressPoseUpdates = false; }, 300);
+  }
+  pad.addEventListener('pointerup', endDrag);
+  pad.addEventListener('pointercancel', endDrag);
+
+  // --- Eyelids -------------------------------------------------------------
+  var lidIds = ['upperL', 'lowerL', 'upperR', 'lowerR'];
+  var sendEyelids = Api.throttle(function () {
+    var fields = { durationMs: 150 };
+    lidIds.forEach(function (id) {
+      fields[id] = parseFloat(document.getElementById('lid-' + id).value);
+    });
+    Api.setEyelids(fields).catch(function (err) { showMsg('Eyelid command failed: ' + err.message, 'error'); });
+  }, 100);
+
+  lidIds.forEach(function (id) {
+    var input = document.getElementById('lid-' + id);
+    var valSpan = document.getElementById('lid-' + id + '-val');
+    input.addEventListener('input', function () {
+      valSpan.textContent = parseFloat(input.value).toFixed(2);
+      sendEyelids();
+    });
+  });
+
+  // --- Natural mode toggle --------------------------------------------------
+  var naturalToggle = document.getElementById('natural-toggle');
+  naturalToggle.addEventListener('change', function () {
+    Api.setSystemConfig({ naturalMode: naturalToggle.checked })
+      .catch(function (err) { showMsg('Could not change natural mode: ' + err.message, 'error'); });
+  });
+
+  // --- Gestures --------------------------------------------------------------
+  Api.getGestures().then(function (list) {
+    var container = document.getElementById('gesture-list');
+    container.innerHTML = '';
+    if (!list || !list.length) {
+      container.innerHTML = '<span class="muted small">No gestures available.</span>';
+      return;
+    }
+    list.forEach(function (g) {
+      var btn = document.createElement('button');
+      btn.className = 'gesture-btn';
+      btn.textContent = g.label || g.id;
+      btn.addEventListener('click', function () {
+        Api.triggerGesture(g.id).catch(function (err) { showMsg('Gesture failed: ' + err.message, 'error'); });
+      });
+      container.appendChild(btn);
+    });
+  }).catch(function (err) {
+    document.getElementById('gesture-list').innerHTML =
+      '<span class="msg msg-error" style="display:inline-block;">Could not load gestures: ' + err.message + '</span>';
+  });
+
+  // --- Initial state + live pose polling --------------------------------------
+  Api.getSystemStatus().then(function (status) {
+    naturalToggle.checked = !!status.naturalMode;
+    if (status.pose) {
+      var nx = status.pose.panDeg / GAZE_RANGE_DEG;
+      var ny = -status.pose.tiltDeg / GAZE_RANGE_DEG;
+      setThumbFromNormalized(Math.max(-1, Math.min(1, nx)), Math.max(-1, Math.min(1, ny)));
+      updateReadout(status.pose.panDeg, status.pose.tiltDeg);
+    }
+    lidIds.forEach(function (id) {
+      if (status.pose && typeof status.pose['lid' + id.charAt(0).toUpperCase() + id.slice(1)] === 'number') {
+        var v = status.pose['lid' + id.charAt(0).toUpperCase() + id.slice(1)];
+        document.getElementById('lid-' + id).value = v;
+        document.getElementById('lid-' + id + '-val').textContent = v.toFixed(2);
+      }
+    });
+  }).catch(function (err) {
+    showMsg('Could not load current status: ' + err.message, 'error');
+  });
+
+  Api.pollEvery(function () {
+    return Api.getPose().then(function (pose) {
+      if (dragging || suppressPoseUpdates) return;
+      var nx = pose.panDeg / GAZE_RANGE_DEG;
+      var ny = -pose.tiltDeg / GAZE_RANGE_DEG;
+      setThumbFromNormalized(Math.max(-1, Math.min(1, nx)), Math.max(-1, Math.min(1, ny)));
+      updateReadout(pose.panDeg, pose.tiltDeg);
+    });
+  }, 700, function (err) { /* transient poll errors are not surfaced as UI noise */ console.warn('pose poll failed', err); });
+})();
+</script>
+</body>
+</html>

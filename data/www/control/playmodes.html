@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Play Modes &mdash; Magic Eyes</title>
+<link rel="stylesheet" href="../css/app.css">
+</head>
+<body class="theme-control">
+<header class="app-header">
+  <div class="app-header-row">
+    <div class="app-header-title">
+      <span class="eye-mark">&#128065;</span>
+      <h1>Play modes</h1>
+    </div>
+    <a class="home-link" href="../index.html">&larr; Home</a>
+  </div>
+</header>
+<nav class="subnav">
+  <a href="manual.html">Manual</a>
+  <a class="active" href="playmodes.html">Play modes</a>
+  <a href="status.html">Status</a>
+</nav>
+
+<main class="container">
+  <div id="msg" class="msg msg-error hidden"></div>
+  <div class="grid" id="mode-list">
+    <p class="muted small">Loading play modes&hellip;</p>
+  </div>
+</main>
+
+<footer class="app-footer">ESP Magic Eyes &mdash; play modes</footer>
+
+<script src="../js/api.js"></script>
+<script>
+(function () {
+  var listEl = document.getElementById('mode-list');
+  var msgEl = document.getElementById('msg');
+  var modes = [];
+  var activeId = null;
+
+  function showError(text) {
+    msgEl.textContent = text;
+    msgEl.classList.remove('hidden');
+  }
+
+  function render() {
+    if (!modes.length) {
+      listEl.innerHTML = '<p class="muted small">No play modes available.</p>';
+      return;
+    }
+    listEl.innerHTML = '';
+    modes.forEach(function (m) {
+      var btn = document.createElement('button');
+      btn.className = 'mode-card' + (m.id === activeId ? ' active' : '');
+      btn.innerHTML =
+        '<div class="mode-card-title">' + escapeHtml(m.label || m.id) +
+        (m.id === activeId ? ' <span class="badge badge-ok">active</span>' : '') + '</div>' +
+        '<div class="mode-card-desc">' + escapeHtml(m.description || '') + '</div>';
+      btn.addEventListener('click', function () {
+        btn.disabled = true;
+        Api.activatePlayMode(m.id)
+          .then(function (res) { activeId = res.playMode; render(); })
+          .catch(function (err) { showError('Could not activate "' + m.id + '": ' + err.message); })
+          .finally(function () { btn.disabled = false; });
+      });
+      listEl.appendChild(btn);
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  Api.getPlayModes()
+    .then(function (list) { modes = list || []; render(); })
+    .catch(function (err) { showError('Could not load play modes: ' + err.message); listEl.innerHTML = ''; });
+
+  Api.pollEvery(function () {
+    return Api.getActivePlayMode().then(function (res) {
+      if (res.playMode !== activeId) {
+        activeId = res.playMode;
+        render();
+      }
+    });
+  }, 2000, function (err) { console.warn('active-mode poll failed', err); });
+})();
+</script>
+</body>
+</html>
