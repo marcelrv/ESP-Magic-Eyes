@@ -32,8 +32,8 @@ void begin();
 // drift/blinks, curious's bigger/faster saccades and blinks, sleep's
 // one-shot ease-to-closed (plus a rare "still breathing" micro-drift),
 // greeting's scripted keyframe playback (auto-settles to idle when the
-// sequence finishes), and tracking's TODO(Phase 5) stub (currently a safe
-// alias of idle — no radar data exists yet). Manual does nothing. Called
+// sequence finishes), and tracking's radar-driven gaze following / presence
+// glance (idle behavior when there's no radar data). Manual does nothing. Called
 // once per MotionTask tick, same as GestureEngine::tick().
 void tick(uint32_t nowMs);
 

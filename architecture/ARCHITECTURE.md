@@ -86,8 +86,15 @@ Layered design:
 
 **NVS (`Preferences.h`)** — small, survives app-only OTA (unlike LittleFS content unless the FS partition is also reflashed):
 - `wifi` namespace: `ssid`, `password`, `hostname` (default `esp-magic-eyes`)
-- `system` namespace: `devName` (default `Magic Eyes`), `naturalMode` (bool, default `true`), `ledEnabled` (bool, default `false`), `otaNetworkEnabled` (bool, default `true`)
-- `servocal` namespace: one packed blob (`calTable`) holding all 7 servos' `{minUs, centerUs, maxUs, inverted}` calibration — one read/write touches all 7 at once, rather than ~28 individual keys. Defaults: `minUs=1000, centerUs=1500, maxUs=2000, inverted=false` (a conservative SG90-safe range chosen deliberately tighter than the servo's absolute extreme, since these are the defaults applied to *unconfigured* hardware).
+- `system` namespace: `devName` (default `Magic Eyes`), `naturalMode` (bool, default `true`), `ledEnabled` (bool, default `false`), `otaNetEn` (bool, default `true`), `radarBaud` (default 115200, LD2420 only), `radarType` (`RadarType` 0 none / 1 LD2420 / 2 LD2450, default LD2420 — stored values must never be renumbered)
+- `servocal` namespace: one packed blob (`calTable`) holding all 7 servos' `ServoCalibration` — one read/write touches all 7 at once. Older blob layouts (V1 without closed/open, V2 without half) are recognized by size and migrated on read, then rewritten on the next save. Defaults: `minUs=1000, centerUs=1500, maxUs=2000` (a conservative SG90-safe range for *unconfigured* hardware); `LidUpperL`/`LidLowerR` default to closed=max/open=min because the mechanism mounts them mirrored.
+- All `NvsStore` functions hold one mutex: they are called from `loop()`, the AsyncTCP task and `setup()`.
+
+**Calibration model** (`ServoCalibration`, `src/storage/nvs_store.h`):
+- `minUs`/`maxUs` are hard safety limits: every motion-engine write is clamped to them (`ServoHal::setPulseUs()`).
+- Pan/tilt: `centerUs` is "looking straight ahead"; ±45° maps piecewise-linearly onto `minUs`..`centerUs`..`maxUs`; `inverted` flips direction.
+- Lids: three measured points — normalized 0.0 = `closedUs` (upper and lower lid just touching), 0.5 = `halfUs`, 1.0 = `openUs` — mapped piecewise linearly, because the lid linkages are non-linear and differ per eye. The points encode direction, so `inverted` does not apply to lids. `halfUs` must lie strictly between closed and open.
+- Every servo is `attach()`ed with ESP32Servo's full 500–2500 µs range, so the calibration page can probe past the saved limits via `ServoHal::setRawPulseUs()` (clamped only to 500–2500).
 - `led` namespace: one packed blob holding `brightness`/`colorL`/`colorR`/`effect`.
 
 **LittleFS** — frontend + data files, mounted from the custom partition (see §8), served at URL root from the `/www/` directory within the filesystem image:
@@ -107,14 +114,15 @@ Base path `/api`. All bodies JSON (ArduinoJson v7 `JsonDocument` — v7 removed 
 - `POST /api/system/reboot`
 
 **WiFi / Setup**
-- `GET /api/wifi/scan` — cached scan results (scanned once at AP bring-up, to avoid the documented `WiFi.scanNetworks()` vs. active-AP conflict)
-- `POST /api/wifi/connect` `{ssid, password}` — saves to NVS, attempts STA connect; the frontend polls `/api/system/status`'s `wifiMode` to observe the outcome (connecting is not instant)
+- `GET /api/wifi/scan` — cached scan results (scanned only before the AP comes up — at boot, or asynchronously when falling back to the AP — to avoid the documented `WiFi.scanNetworks()` vs. active-AP conflict)
+- `POST /api/wifi/connect` `{ssid, password}` — attempts an STA connect and saves the credentials to NVS only once the link has held for 3 s (a mistyped password never replaces working credentials); the frontend polls `/api/system/status`'s `wifiMode` to observe the outcome (connecting is not instant)
 - `POST /api/wifi/forget` — clears NVS creds, reboots to AP setup mode (deferred restart so the HTTP response flushes first)
 
 **Servo calibration**
-- `GET /api/servos/config` — current calibration table (all 7 servos)
-- `POST /api/servos/config` `{servoId, minUs, centerUs, maxUs, inverted}` — validated (`minUs < centerUs < maxUs`, absolute bound 400-2600µs, further clamped by ESP32Servo's own 500-2500µs limit), applied live
-- `POST /api/servos/test` `{servoId, pulseUs}` — direct raw pulse for calibration UI, bypasses `CommandQueue`/`MotionTask` entirely (a live `MotionTask` target on that axis can overwrite a test pulse within ~20ms — expected, calibration is meant to be done with the axis otherwise idle)
+- `GET /api/servos/config` — current calibration table (all 7 servos, with `kind`: gaze / lid / aux)
+- `POST /api/servos/config` — gaze/aux `{servoId, minUs, centerUs, maxUs, inverted?}` (`minUs < centerUs < maxUs`); lids `{servoId, minUs, maxUs, closedUs, openUs, halfUs?}` (closed/open within min/max, half strictly between). Absolute bound 400–2600 µs, applied live without a reboot.
+- `POST /api/servos/test` `{servoId, pulseUs}` and `POST /api/servos/pose` `{pulses: [{servoId, pulseUs}, ...]}` — raw, uneased pulses for the calibration page; both (re)start the calibration hold.
+- `GET/POST /api/servos/hold` `{enabled}` — the calibration hold: `MotionTask` writes nothing for 30 s (refreshed by the page) so raw pulses stay put. On release/expiry the axes re-sync to the servos' real positions and ease back to the rest pose.
 
 **Manual eye control**
 - `POST /api/eyes/gaze` `{pan, tilt, durationMs, easing}` — degrees, ±45° convention (see §6's degrees-to-pulse mapping), `source=Manual`
@@ -277,8 +285,30 @@ lib_deps =
 
 For whoever flashes a fresh board:
 1. First-boot AP setup flow: connect to `MagicEyes-Setup-XXXX`, browse to any HTTP address, confirm the captive portal redirects to the WiFi setup page, enter home WiFi credentials, confirm the device reconnects in STA mode.
-2. Servo calibration: for each of the 7 channels, use `setup/calibration.html`'s test button to find safe min/center/max pulse widths for the physical mechanism, then save.
+2. Servo calibration: work through `setup/calibration.html`'s guided steps (straight ahead → lids closed → lids open → half open → limits) for each servo, then use "Compare both eyes" to check left and right lids match.
 3. Gestures and manual gaze control: verify each gesture button and the gaze pad produce the expected physical motion; adjust the pan/tilt ±45° convention or per-servo calibration if the physical range doesn't match.
 4. Natural mode: toggle on/off and visually confirm eyelids track gaze plausibly.
 5. Radar: with the physical LD2420 wired per `include/pin_map.h` (RX GPIO22 from OT2, TX GPIO17 — see the hardware erratum in §1), confirm `setup/radar.html` shows presence detection; note that HLK-LD2420 firmware versions vary in UART baud rate (115200 vs. 256000) and TX/RX pin roles — verify against the specific module before assuming the driver's default settings are correct.
 6. OTA: perform one web OTA update and one network (`pio run -t upload --upload-port <ip>`) OTA update to confirm both paths work before relying on them for future updates.
+
+---
+
+## Status & open items
+
+All nine build phases (scaffold → integration) are complete. PROGRESS.md is the frozen build log: useful for *why* something was done, but parts of it are superseded (e.g. its two build environments and the radar "Bug 3" pin swap). This document and the code are current.
+
+**Hardware-verified** (LD2420 board): WiFi setup, fallback and recovery (including a wrong password via the API), calibration (hold, NVS migration, half-open point), gestures and abort-restore, sticky manual eyelids, greeting → idle, web OTA (including recovery from an interrupted upload), serial console.
+
+**Not yet verified on hardware:** LD2450 decoding and tracking, `millis()` wrap (~49.7 days), NVS write-failure handling, and the PR #2 changes (runtime radar selection, AP kept up during retries, async fallback scan, pulse-exact calibration-hold exit, per-request body buffers).
+
+**Deliberately deferred:**
+- Authentication for `/setup/*`, the API and web OTA; ArduinoOTA has no password (see §7).
+- WebSocket telemetry (`/ws`) — REST polling only (see §2).
+- Optional motion extras from the original plan: pan-based asymmetric lid tightening during fast saccades (`TODO` in `natural_mode.h`), saccade blink-through (auto-blink on a >~25° gaze jump), and curious mode's asymmetric lid narrowing.
+
+**Hardware gotchas already handled in code** (details in the code comments):
+- The Aux servo channel (GPIO13) hangs `Servo::attach()` when attached as the 7th channel at boot, so it is attached lazily on first use (`servo_hal.cpp`).
+- LittleFS must be mounted with partition label `littlefs` (`main.cpp`); the library default is `spiffs`.
+- Radar RX is on GPIO22 via a bodge wire from the LD2420's OT2 pad (§1 erratum).
+- Two lids are mounted mirrored (`LidUpperL`, `LidLowerR`); their default calibration accounts for it.
+- SG90 lid moves need ≥ ~100 ms to complete; gesture keyframes are multiples of the 20 ms motion tick.

@@ -1,5 +1,12 @@
 # ESP Magic Eyes — Build Progress
 
+> **Frozen build log (historical).** Kept for the reasoning behind past
+> decisions, which code comments refer to. Parts are superseded — notably
+> the two `ld2420`/`ld2450` build environments (now one image with a
+> runtime radar setting) and "Bug 3" (the radar RX pin is GPIO22).
+> Current state and open items: `architecture/ARCHITECTURE.md`
+> ("Status & open items"). Don't append new entries here.
+
 Each phase must pass `pio run -e ld2420` and `pio run -e ld2450` (zero errors) before being marked done.
 
 - [x] Phase 0 — Scaffold (platformio.ini, partitions.csv, pin map header, empty main.cpp, .vscode config)

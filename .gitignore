@@ -20,3 +20,6 @@ Thumbs.db
 
 # Local tool binaries (not part of the project)
 esptool.exe
+
+# Local, machine-specific agent notes (CLAUDE.md is shared and committed)
+CLAUDE.local.md
