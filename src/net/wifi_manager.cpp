@@ -237,7 +237,10 @@ void beginStaConnect(const String &ssid, const String &password) {
   gGotIpThisAttempt = false;
   gLinkUpTiming = false;
   if (gFallbackScanRunning) {
-    // e.g. serial-console credentials arriving mid-fallback-scan
+    // e.g. serial-console credentials arriving mid-fallback-scan. Stop the
+    // scan itself (scanDelete() only frees cached results): the driver
+    // rejects a connect while a scan is running.
+    esp_wifi_scan_stop();
     WiFi.scanDelete();
     gFallbackScanRunning = false;
   }

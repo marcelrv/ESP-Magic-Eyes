@@ -133,7 +133,7 @@ Base path `/api`. All bodies JSON (ArduinoJson v7 `JsonDocument` — v7 removed 
 **Radar**
 - `GET /api/radar/status` — configured sensor model (`LD2420`/`LD2450`/`NONE`), link state, last-seen timestamp
 - `GET/POST /api/radar/config` — `{type: "none"|"ld2420"|"ld2450", baudRate}` (baud applies to the LD2420 only); a POST saves to NVS and reboots
-- `GET /api/radar/latest` — last parsed reading; fields the active sensor can't provide (e.g. angle on LD2420) are simply absent rather than a placeholder value — the frontend adapts to whichever fields are present rather than branching on which radar type is configured
+- `GET /api/radar/latest` — last parsed reading; every target field is always present, and a field the active sensor can't provide (e.g. angle on LD2420) is JSON `null` rather than a placeholder value — the frontend adapts to whichever fields are present rather than branching on which radar type is configured
 
 **LED**
 - `GET/POST /api/led/config` `{enabled, brightness, colorL:{r,g,b}, colorR:{r,g,b}, effect}` — `effect` is one of `off`/`solid`/`breathe`
