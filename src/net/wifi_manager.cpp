@@ -5,6 +5,9 @@
 
 #include <atomic>
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+
 #include <esp_wifi.h>
 
 #include "storage/nvs_store.h"
@@ -49,9 +52,12 @@ constexpr uint32_t kStaFailedHoldMs = 2500;
 // was busy, ...), the device used to sit in AP setup mode forever — off
 // the home network, not even pingable, until someone power-cycled it.
 // Now it retries the saved network this often while in fallback AP mode.
-// A retry is skipped while a client is connected to the setup AP, since
-// an AP_STA connect attempt can hop the AP's channel and disrupt the
-// captive portal the user is actively using.
+// The retry runs as WIFI_AP_STA with the setup AP kept up, so the AP never
+// disappears from the air (tearing it down for the ~20s connect+fallback
+// cycle hid it a third of the time and dropped phones mid-join). A retry
+// is still skipped while a client is connected to the setup AP, since the
+// STA's channel search can hop the AP's channel and disrupt the captive
+// portal the user is actively using.
 constexpr uint32_t kStaRetryIntervalMs = 60000;
 bool gRetrySavedNetwork = false;
 uint32_t gNextStaRetryMs = 0;
@@ -131,6 +137,14 @@ void onWifiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
 
 WifiScanResult gScanResults[kMaxScanResults];
 size_t gScanCount = 0;
+// Guards gScanResults/gScanCount: written from loop() (storeScanResults()),
+// read from the AsyncTCP task (GET /api/wifi/scan). The entries hold
+// Strings, so an unguarded read during a rewrite could touch freed heap.
+SemaphoreHandle_t gScanMutex = nullptr;
+
+// True while the fallback path's asynchronous scan (see the STA_FAILED
+// branch of handle()) is in flight.
+bool gFallbackScanRunning = false;
 
 String buildApSsid() {
   uint64_t chipId = ESP.getEfuseMac();
@@ -143,11 +157,30 @@ String buildApSsid() {
   return ssid;
 }
 
+// Copies a finished scan (`found` = scanNetworks()/scanComplete() result)
+// into gScanResults and frees the driver's copy.
+void storeScanResults(int found) {
+  size_t n = found > 0 ? static_cast<size_t>(found) : 0;
+  if (n > kMaxScanResults) {
+    n = kMaxScanResults;
+  }
+  xSemaphoreTake(gScanMutex, portMAX_DELAY);
+  for (size_t i = 0; i < n; ++i) {
+    gScanResults[i].ssid = WiFi.SSID(i);
+    gScanResults[i].rssiDbm = WiFi.RSSI(i);
+    gScanResults[i].secure = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
+  }
+  gScanCount = n;
+  xSemaphoreGive(gScanMutex);
+  WiFi.scanDelete();
+}
+
 void runScanOnce() {
   // Per research finding (plan §6): avoid scanning while the AP is
   // already up. This is called once at boot, before softAP() starts, so
   // it's safe to run synchronously here (one-time startup cost, not a
-  // loop()-repeated operation).
+  // loop()-repeated operation). The runtime fallback path scans
+  // asynchronously instead — see the STA_FAILED branch of handle().
   //
   // Note: on a freshly-erased board (no cached WiFi/PHY calibration data)
   // this first WiFi.scanNetworks() call takes a few seconds longer than
@@ -157,22 +190,7 @@ void runScanOnce() {
   // here (that turned out to be ServoHal::begin()'s attach() of the Aux
   // servo channel — see PROGRESS.md's "Hardware bring-up fixes
   // (post-Phase 8)" section for the full root-cause story).
-  int found = WiFi.scanNetworks(/*async=*/false, /*show_hidden=*/false);
-  gScanCount = 0;
-  if (found <= 0) {
-    return;
-  }
-  size_t n = static_cast<size_t>(found);
-  if (n > kMaxScanResults) {
-    n = kMaxScanResults;
-  }
-  for (size_t i = 0; i < n; ++i) {
-    gScanResults[i].ssid = WiFi.SSID(i);
-    gScanResults[i].rssiDbm = WiFi.RSSI(i);
-    gScanResults[i].secure = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
-  }
-  gScanCount = n;
-  WiFi.scanDelete();
+  storeScanResults(WiFi.scanNetworks(/*async=*/false, /*show_hidden=*/false));
 }
 
 void startApMode() {
@@ -218,6 +236,11 @@ void beginStaConnect(const String &ssid, const String &password) {
   }
   gGotIpThisAttempt = false;
   gLinkUpTiming = false;
+  if (gFallbackScanRunning) {
+    // e.g. serial-console credentials arriving mid-fallback-scan
+    WiFi.scanDelete();
+    gFallbackScanRunning = false;
+  }
 
   // If AP is currently active, stay in WIFI_AP_STA so the captive portal
   // remains reachable while this attempt is in flight; otherwise plain
@@ -239,6 +262,7 @@ void begin() {
   // recorded every attempted (possibly wrong) password.
   WiFi.persistent(false);
   WiFi.onEvent(onWifiEvent);
+  gScanMutex = xSemaphoreCreateMutex();
 
   WifiCredentials creds = NvsStore::getWifiCredentials();
 
@@ -281,7 +305,11 @@ void handle() {
       }
       Serial.print("[WiFi] Connected, IP=");
       Serial.println(WiFi.localIP());
-    } else if (millis() - gStaConnectStartMs > kStaConnectTimeoutMs) {
+    } else if (!gLinkUpTiming && millis() - gStaConnectStartMs > kStaConnectTimeoutMs) {
+      // Not while the link is up and being verified (gLinkUpTiming): a slow
+      // router that hands out an IP near the deadline still gets its
+      // kStaStableMs check. A link that drops again clears gLinkUpTiming,
+      // so the attempt is bounded by timeout + kStaStableMs.
       Serial.println("[WiFi] STA connect timed out.");
       gMode = WifiMode::STA_FAILED;
       gStaFailedAtMs = millis();
@@ -312,18 +340,33 @@ void handle() {
     // falling back to AP mode, so GET /api/system/status's wifiMode has a
     // real chance to be observed as STA_FAILED by a polling client first.
     if (millis() - gStaFailedAtMs > kStaFailedHoldMs) {
+      bool apReady = true;
       if (gApActive) {
-        // A portal-initiated attempt (AP kept up, WIFI_AP_STA) failed: the
-        // AP is still up, just go back to it (no re-scan — scanning with
-        // the AP up is avoided, see runScanOnce()).
+        // A portal-initiated attempt or background retry (AP kept up,
+        // WIFI_AP_STA) failed: the AP is still up, just go back to it (no
+        // re-scan — scanning with the AP up is avoided, see runScanOnce()).
         gMode = WifiMode::AP_SETUP;
         WiFi.mode(WIFI_AP);
+      } else if (!gFallbackScanRunning) {
+        // Scan before the AP comes up, but asynchronously: a blocking scan
+        // stalls loop() (buttons, LEDs, OTA, serial console) for 3-6s.
+        WiFi.scanNetworks(/*async=*/true, /*show_hidden=*/false);
+        gFallbackScanRunning = true;
+        apReady = false;
       } else {
-        runScanOnce();
-        startApMode();
+        int found = WiFi.scanComplete();
+        if (found == WIFI_SCAN_RUNNING) {
+          apReady = false;
+        } else {
+          gFallbackScanRunning = false;
+          storeScanResults(found);
+          startApMode();
+        }
       }
-      gRetrySavedNetwork = NvsStore::getWifiCredentials().valid;
-      gNextStaRetryMs = millis() + kStaRetryIntervalMs;
+      if (apReady) {
+        gRetrySavedNetwork = NvsStore::getWifiCredentials().valid;
+        gNextStaRetryMs = millis() + kStaRetryIntervalMs;
+      }
     }
   } else if (gMode == WifiMode::AP_SETUP && gRetrySavedNetwork &&
              static_cast<int32_t>(millis() - gNextStaRetryMs) >= 0) {
@@ -332,12 +375,10 @@ void handle() {
     } else {
       WifiCredentials creds = NvsStore::getWifiCredentials();
       if (creds.valid) {
-        // Nobody is using the portal: take the AP down and retry exactly
-        // like a boot-time connect (plain WIFI_STA), rather than bolting
-        // STA onto the running AP. On failure the STA_FAILED branch above
-        // re-scans and brings the AP back up.
+        // Nobody is using the portal: retry as WIFI_AP_STA with the AP kept
+        // up (see kStaRetryIntervalMs). On success the STA_CONNECTING
+        // branch takes the AP down; on failure STA_FAILED returns to it.
         Serial.println("[WiFi] Retrying saved network from fallback AP mode.");
-        stopApMode();
         beginStaConnect(creds.ssid, creds.password);
       } else {
         gRetrySavedNetwork = false;
@@ -405,9 +446,15 @@ void forgetNetwork() {
   ESP.restart();
 }
 
-const WifiScanResult *getCachedScanResults(size_t &countOut) {
-  countOut = gScanCount;
-  return gScanResults;
+std::vector<WifiScanResult> getCachedScanResults() {
+  std::vector<WifiScanResult> copy;
+  if (gScanMutex == nullptr) {
+    return copy;
+  }
+  xSemaphoreTake(gScanMutex, portMAX_DELAY);
+  copy.assign(gScanResults, gScanResults + gScanCount);
+  xSemaphoreGive(gScanMutex);
+  return copy;
 }
 
 } // namespace WifiManager

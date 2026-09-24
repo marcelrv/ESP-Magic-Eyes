@@ -42,14 +42,6 @@ void setup() {
   Serial.print(FIRMWARE_VERSION);
   Serial.println(" — booting");
 
-#if defined(RADAR_LD2420)
-  Serial.println("Radar variant: HLK-LD2420 (RADAR_LD2420)");
-#elif defined(RADAR_LD2450)
-  Serial.println("Radar variant: HLK-LD2450 (RADAR_LD2450)");
-#else
-  Serial.println("Radar variant: NONE (no RADAR_LD2420/RADAR_LD2450 build flag set)");
-#endif
-
   // Hardware bring-up fix (post-Phase 8): LittleFS::begin()'s default
   // partitionLabel is the literal string "spiffs" (see
   // LittleFS.h: begin(bool, const char*, uint8_t, const char* partitionLabel

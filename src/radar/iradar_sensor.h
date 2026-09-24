@@ -9,9 +9,9 @@
 // (radar_routes.cpp, PlayModeManager's tracking mode) must check `has_value()`
 // before reading a target field.
 //
-// IRadarSensor itself is a small interface implemented by exactly one of
-// Ld2420Sensor / Ld2450Sensor per build (selected by the existing
-// RADAR_LD2420 / RADAR_LD2450 build-time flag — see radar_task.cpp). It is
+// IRadarSensor itself is a small interface implemented by Ld2420Sensor and
+// Ld2450Sensor; RadarTask instantiates the one NvsStore::getRadarType()
+// selects (or none) at boot — see radar_task.cpp. It is
 // NOT thread-safe on its own: only RadarTask ever calls begin()/poll()/
 // getState() on a sensor instance, all from within RadarTask's own FreeRTOS
 // task. RadarTask.cpp then copies that into a mutex-guarded shared RadarState
@@ -50,8 +50,8 @@ struct RadarState {
   uint32_t lastUpdateMs = 0;  // millis() of the last successfully parsed frame; 0 == never
 };
 
-// Implemented by Ld2420Sensor (RADAR_LD2420 builds) and Ld2450Sensor
-// (RADAR_LD2450 builds) — see radar/ld2420_sensor.h / radar/ld2450_sensor.h.
+// Implemented by Ld2420Sensor and Ld2450Sensor — see radar/ld2420_sensor.h /
+// radar/ld2450_sensor.h.
 class IRadarSensor {
  public:
   virtual ~IRadarSensor() = default;

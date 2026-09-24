@@ -4,6 +4,8 @@
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 
+#include <cstring>
+
 #include "api/json_helpers.h"
 #include "radar/iradar_sensor.h"
 #include "radar/radar_task.h"
@@ -58,17 +60,44 @@ void handleLatest(AsyncWebServerRequest *request) {
   sendJson(request, doc);
 }
 
+// Radar type <-> API string ("none" | "ld2420" | "ld2450").
+const char *radarTypeId(RadarType type) {
+  switch (type) {
+    case RadarType::LD2420:
+      return "ld2420";
+    case RadarType::LD2450:
+      return "ld2450";
+    case RadarType::None:
+      break;
+  }
+  return "none";
+}
+
+bool parseRadarType(const char *id, RadarType *out) {
+  if (id == nullptr) return false;
+  if (strcmp(id, "none") == 0) { *out = RadarType::None; return true; }
+  if (strcmp(id, "ld2420") == 0) { *out = RadarType::LD2420; return true; }
+  if (strcmp(id, "ld2450") == 0) { *out = RadarType::LD2450; return true; }
+  return false;
+}
+
 // --- GET /api/radar/config -----------------------------------------------
+// `type` is the saved setting; `activeType` is what RadarTask started with
+// at boot (they differ only between a save and the reboot it triggers).
 void handleGetConfig(AsyncWebServerRequest *request) {
   JsonDocument doc;
+  doc["type"] = radarTypeId(NvsStore::getRadarType());
+  doc["activeType"] = radarTypeId(RadarTask::getType());
   doc["baudRate"] = NvsStore::getRadarBaudRate();
   sendJson(request, doc);
 }
 
 // --- POST /api/radar/config ------------------------------------------------
-// Only saves + reboots — RadarTask::begin() only ever opens the UART once
-// at boot (radar_task.cpp), so a newly-saved baud can't take effect without
-// a fresh begin() call. Deferred-restart pattern matches
+// {"type": "none"|"ld2420"|"ld2450", "baudRate": n} — either field may be
+// omitted, but not both. Only saves + reboots — RadarTask::begin() picks
+// the sensor and opens the UART once at boot (radar_task.cpp), so a new
+// type or baud can't take effect without a fresh begin() call.
+// Deferred-restart pattern matches
 // ota_routes.cpp/rest_routes.cpp: respond first, let AsyncTCP flush that
 // response, then ESP.restart().
 constexpr uint32_t kMinBaud = 1200;
@@ -78,39 +107,44 @@ bool gRestartPending = false;
 uint32_t gRestartAtMs = 0;
 constexpr uint32_t kRestartDelayMs = 500;
 
-String gConfigBodyBuffer;
 
 void handlePostConfigBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-  if (index == 0) {
-    gConfigBodyBuffer = "";
-    gConfigBodyBuffer.reserve(total);
-  }
-  gConfigBodyBuffer.concat(reinterpret_cast<const char *>(data), len);
-  if (index + len != total) {
-    return;  // wait for the remaining chunk(s)
-  }
-
   JsonDocument reqDoc;
-  DeserializationError parseErr = deserializeJson(reqDoc, gConfigBodyBuffer);
-  if (parseErr) {
-    sendJsonError(request, 400, "invalid_json");
-    return;
+  if (!JsonHelpers::collectJsonBody(request, data, len, index, total, reqDoc)) {
+    return; // more chunks pending, or an error response was already sent
   }
 
-  if (!reqDoc["baudRate"].is<uint32_t>()) {
-    sendJsonError(request, 400, "missing_baudRate");
+  bool hasType = !reqDoc["type"].isNull();
+  bool hasBaud = !reqDoc["baudRate"].isNull();
+  if (!hasType && !hasBaud) {
+    sendJsonError(request, 400, "missing_type_or_baudRate");
     return;
   }
-  uint32_t baudRate = reqDoc["baudRate"].as<uint32_t>();
-  if (baudRate < kMinBaud || baudRate > kMaxBaud) {
-    sendJsonError(request, 400, "baudRate_out_of_range");
+  RadarType type = NvsStore::getRadarType();
+  if (hasType && !parseRadarType(reqDoc["type"].as<const char *>(), &type)) {
+    sendJsonError(request, 400, "invalid_type");
     return;
+  }
+  uint32_t baudRate = NvsStore::getRadarBaudRate();
+  if (hasBaud) {
+    if (!reqDoc["baudRate"].is<uint32_t>()) {
+      sendJsonError(request, 400, "invalid_baudRate");
+      return;
+    }
+    baudRate = reqDoc["baudRate"].as<uint32_t>();
+    if (baudRate < kMinBaud || baudRate > kMaxBaud) {
+      sendJsonError(request, 400, "baudRate_out_of_range");
+      return;
+    }
   }
 
-  NvsStore::setRadarBaudRate(baudRate);
+  // Validated in full before anything is saved.
+  if (hasType) NvsStore::setRadarType(type);
+  if (hasBaud) NvsStore::setRadarBaudRate(baudRate);
 
   JsonDocument doc;
   doc["success"] = true;
+  doc["type"] = radarTypeId(type);
   doc["baudRate"] = baudRate;
   doc["rebooting"] = true;
   sendJson(request, doc);

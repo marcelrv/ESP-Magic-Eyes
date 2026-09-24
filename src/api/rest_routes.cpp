@@ -11,6 +11,7 @@
 #include "motion/playmode_manager.h"
 #include "net/ota_manager.h"
 #include "net/wifi_manager.h"
+#include "radar/radar_task.h"
 #include "storage/nvs_store.h"
 #include "version.h"
 
@@ -23,16 +24,6 @@ String chipIdHex() {
   uint32_t low = static_cast<uint32_t>(chipId & 0xFFFFFFFF);
   snprintf(buf, sizeof(buf), "%08lX%08lX", static_cast<unsigned long>(high), static_cast<unsigned long>(low));
   return String(buf);
-}
-
-const char *radarVariant() {
-#if defined(RADAR_LD2420)
-  return "LD2420";
-#elif defined(RADAR_LD2450)
-  return "LD2450";
-#else
-  return "NONE";
-#endif
 }
 
 // Why the chip last (re)started — lets a brownout (servo current spikes on
@@ -60,7 +51,7 @@ void handleSystemInfo(AsyncWebServerRequest *request) {
   doc["uptimeMs"] = millis();
   doc["resetReason"] = resetReasonName();
   doc["freeHeap"] = ESP.getFreeHeap();
-  doc["radarVariant"] = radarVariant();
+  doc["radarVariant"] = RadarTask::sensorModelName();
   // Phase 2: surfaced here so the future OTA setup page (Phase 7) can
   // display/toggle it. Read from OtaManager's cached flag (kept in sync
   // with NVS) rather than NvsStore directly, so this always reflects
@@ -106,28 +97,12 @@ void handleSystemStatus(AsyncWebServerRequest *request) {
 }
 
 // POST /api/system/config — low-effort partial config endpoint, currently
-// only handles { "otaNetworkEnabled": bool } (Phase 2 scope). Body is
-// assembled in this buffer since ArBodyHandlerFunction may deliver it in
-// more than one chunk for larger payloads; fine for the tiny JSON bodies
-// this route expects.
-String gConfigBodyBuffer;
+// only handles { "otaNetworkEnabled": bool } (Phase 2 scope).
 
 void handleSystemConfigBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-  if (index == 0) {
-    gConfigBodyBuffer = "";
-    gConfigBodyBuffer.reserve(total);
-  }
-  gConfigBodyBuffer.concat(reinterpret_cast<const char *>(data), len);
-
-  if (index + len != total) {
-    return; // wait for the remaining chunk(s)
-  }
-
   JsonDocument reqDoc;
-  DeserializationError parseErr = deserializeJson(reqDoc, gConfigBodyBuffer);
-  if (parseErr) {
-    JsonHelpers::sendJsonError(request, 400, "invalid_json");
-    return;
+  if (!JsonHelpers::collectJsonBody(request, data, len, index, total, reqDoc)) {
+    return; // more chunks pending, or an error response was already sent
   }
 
   if (reqDoc["otaNetworkEnabled"].is<bool>()) {

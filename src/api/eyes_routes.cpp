@@ -48,25 +48,10 @@ bool parseDurationMs(JsonVariantConst reqDoc, uint32_t def, uint32_t *out) {
 }
 
 // --- POST /api/eyes/gaze --------------------------------------------------
-// Body-buffer pattern matches servo_routes.cpp/rest_routes.cpp:
-// ArBodyHandlerFunction may deliver the body in more than one chunk.
-String gGazeBodyBuffer;
-
 void handleGazeBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-  if (index == 0) {
-    gGazeBodyBuffer = "";
-    gGazeBodyBuffer.reserve(total);
-  }
-  gGazeBodyBuffer.concat(reinterpret_cast<const char *>(data), len);
-  if (index + len != total) {
-    return; // wait for the remaining chunk(s)
-  }
-
   JsonDocument reqDoc;
-  DeserializationError parseErr = deserializeJson(reqDoc, gGazeBodyBuffer);
-  if (parseErr) {
-    sendJsonError(request, 400, "invalid_json");
-    return;
+  if (!JsonHelpers::collectJsonBody(request, data, len, index, total, reqDoc)) {
+    return; // more chunks pending, or an error response was already sent
   }
 
   if (!reqDoc["pan"].is<float>() && !reqDoc["tilt"].is<float>()) {
@@ -98,23 +83,10 @@ void handleGazeBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, s
 }
 
 // --- POST /api/eyes/eyelids -----------------------------------------------
-String gEyelidsBodyBuffer;
-
 void handleEyelidsBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-  if (index == 0) {
-    gEyelidsBodyBuffer = "";
-    gEyelidsBodyBuffer.reserve(total);
-  }
-  gEyelidsBodyBuffer.concat(reinterpret_cast<const char *>(data), len);
-  if (index + len != total) {
-    return;
-  }
-
   JsonDocument reqDoc;
-  DeserializationError parseErr = deserializeJson(reqDoc, gEyelidsBodyBuffer);
-  if (parseErr) {
-    sendJsonError(request, 400, "invalid_json");
-    return;
+  if (!JsonHelpers::collectJsonBody(request, data, len, index, total, reqDoc)) {
+    return; // more chunks pending, or an error response was already sent
   }
 
   EyeCommand cmd;
