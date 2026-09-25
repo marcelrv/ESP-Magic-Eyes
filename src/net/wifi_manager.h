@@ -44,6 +44,12 @@ const char *getModeName(WifiMode mode);
 // normally 192.168.4.1). Empty string otherwise.
 String getIpAddress();
 
+// True once mDNS (<hostname>.local) runs. Started on the first home-network
+// connection and then left running (it follows reconnects by itself), so
+// other code, e.g. OtaManager, may add or remove services but never end it.
+// loop() only.
+bool mdnsRunning();
+
 // AP SSID in use while in AP_SETUP mode, e.g. "MagicEyes-Setup-A1B2".
 String getApSsid();
 
