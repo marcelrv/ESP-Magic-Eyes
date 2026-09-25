@@ -17,6 +17,11 @@ constexpr uint16_t kOtaPort = 3232;
 
 bool gEnabledCached = true;
 bool gStarted = false;
+// Whether the "_arduino" mDNS advert is up. Tracked on its own because mDNS
+// may only come up after OTA started (WifiManager retries a failed mDNS
+// start); OTA itself deliberately doesn't wait for it, since uploads by IP
+// work without mDNS.
+bool gAdvertised = false;
 
 // Password bookkeeping, loop() only except gPasswordLocked (read by the
 // /api/auth/status handler). gAppliedMd5 is the hash handed to ArduinoOTA,
@@ -64,14 +69,12 @@ void startOta() {
   });
 
   // WifiManager owns mDNS (see startMdnsOnce()): with ArduinoOTA's own mDNS
-  // on, its end() would take <hostname>.local down with it. Only add or
-  // remove the "_arduino" service that IDE network-port discovery uses.
+  // on, its end() would take <hostname>.local down with it. handle() only
+  // adds or removes the "_arduino" service that IDE network-port discovery
+  // uses.
   ArduinoOTA.setMdnsEnabled(false);
   ArduinoOTA.setPort(kOtaPort);
   ArduinoOTA.begin();
-  if (WifiManager::mdnsRunning()) {
-    MDNS.enableArduino(kOtaPort, gAppliedMd5.length() > 0);
-  }
   gStarted = true;
   Serial.print("[OTA] ArduinoOTA started, hostname=");
   Serial.println(hostname);
@@ -79,8 +82,9 @@ void startOta() {
 
 void stopOta() {
   ArduinoOTA.end();
-  if (WifiManager::mdnsRunning()) {
+  if (gAdvertised) {
     MDNS.disableArduino();
+    gAdvertised = false;
   }
   gStarted = false;
   Serial.println("[OTA] ArduinoOTA stopped.");
@@ -106,6 +110,11 @@ void handle() {
     startOta();
   } else if ((!canRun || passwordStale) && gStarted) {
     stopOta();
+  }
+
+  if (gStarted && !gAdvertised && WifiManager::mdnsRunning()) {
+    MDNS.enableArduino(kOtaPort, gAppliedMd5.length() > 0);
+    gAdvertised = true;
   }
 
   if (gStarted) {
