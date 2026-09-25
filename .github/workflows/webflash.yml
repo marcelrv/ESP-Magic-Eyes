@@ -4,7 +4,9 @@
 #   stable/  the newest (non-prerelease) GitHub Release
 # Pushing a v* tag builds that tag and attaches the files to its Release
 # (tags with a "-", e.g. v1.2.0-rc1, become prereleases and not "stable"),
-# then redeploys the site so "stable" picks it up.
+# then starts this workflow again on main so the site redeploys and
+# "stable" picks it up. The deploy itself only ever runs from main: the
+# github-pages environment refuses deployments from tags (v0.1.0 hit that).
 #
 # One-time repo setup: Settings -> Pages -> Source: "GitHub Actions".
 
@@ -25,6 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write   # to start the main deploy below
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/pio-build
@@ -40,11 +43,15 @@ jobs:
           gh release view "$TAG" >/dev/null 2>&1 ||
             gh release create "$TAG" --verify-tag --generate-notes $PRE
           gh release upload "$TAG" out/* --clobber
+      # A workflow_dispatch is the one event GITHUB_TOKEN may trigger.
+      - name: Redeploy the site from main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run webflash.yml --ref main
 
   pages:
-    needs: release
-    # Also runs on plain main pushes, where "release" is skipped.
-    if: ${{ !cancelled() && needs.release.result != 'failure' }}
+    # main pushes and dispatches on main; see the note at the top.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
