@@ -1,0 +1,19 @@
+name: PlatformIO build
+description: Build the esp32dev firmware and LittleFS image of the checked-out tree.
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ~/.platformio
+          ~/.cache/pip
+        key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+    - shell: bash
+      run: |
+        pip install --upgrade platformio
+        pio run -e esp32dev
+        pio run -e esp32dev -t buildfs

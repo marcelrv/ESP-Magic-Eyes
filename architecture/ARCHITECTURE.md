@@ -271,6 +271,11 @@ Two 1.5MB OTA app slots, ~960KB LittleFS (as built, the frontend + data files us
 - **Network OTA**: `ArduinoOTA`, toggleable, enables `pio run -t upload --upload-port <device-ip>` directly from VSCode/PlatformIO. With an admin password set, this also needs `upload_flags = --auth=<admin password>` (§4a).
 - **Web OTA**: `setup/ota.html` + `/api/ota/firmware` / `/api/ota/filesystem`, hand-written against `Update.h` (no ready-made drop-in like ElegantOTA was found to be confirmed-compatible with the ESPAsyncWebServer fork in use, so this is a small first-party handler).
 - Both app slots mean a failed OTA can roll back; `Update.h` handles the slot-switch/verify automatically.
+- **Web flasher (USB)**: `.github/workflows/webflash.yml` publishes `webflash/index.html` to GitHub Pages with two channels, each a directory holding a `manifest.json` and the `.bin` files. `latest/` is built from `main` on every deploy. `stable/` is copied unchanged from the newest non-prerelease GitHub Release. Pushing a `v*` tag builds that tag and attaches the same files to its Release. Tags containing a `-` are marked prereleases and never become stable. The run then redeploys the site. The page uses [ESP Web Tools](https://esphome.github.io/esp-web-tools/) (Web Serial, Chrome/Edge only). `webflash/assemble.sh` writes each manifest.
+  - The manifest lists **separate parts** (bootloader, partitions, `boot_app0`, app at `app0`, LittleFS) rather than one `merge_bin` image, because `merge_bin` fills the gaps with 0xFF and would wipe NVS. As a result, an install without "erase" is a settings-preserving update.
+  - The app and LittleFS offsets come from the `partitions.csv` of the tree being built, so a release keeps its own layout. The bootloader, partitions and `boot_app0` offsets (0x1000, 0x8000, 0xe000) are the ESP32 Arduino defaults and are hardcoded.
+  - Nothing writes to LittleFS at runtime, so reflashing it loses no data. Installing always boots `app0`, because `boot_app0` resets otadata.
+  - Open item: the firmware still reports `FIRMWARE_VERSION` from `include/version.h`, not the tag name, so bump that before tagging.
 
 ---
 

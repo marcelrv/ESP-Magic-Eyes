@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ESP Magic Eyes Installer</title>
+  <meta name="description" content="Install or update the ESP Magic Eyes firmware from your browser.">
+  <!-- Published by .github/workflows/webflash.yml next to the generated
+       latest/ and stable/ channel dirs (manifest.json + .bin). Colours follow data/www/css/app.css
+       so the installer looks like the device's own web UI. -->
+  <!-- Exact version on purpose: this script gets serial access to the board. -->
+  <script type="module" src="https://cdn.jsdelivr.net/npm/esp-web-tools@10.4.0/dist/web/install-button.js"></script>
+  <style>
+    :root {
+      --bg: #f4f5f7; --card: #fff; --text: #1b1f24; --muted: #5b6472;
+      --border: #d8dce1; --accent: #2f6fed; --accent-2: #7b4dff;
+      --accent-soft: #e8f0fe; --warn-soft: #fdf1dc; --warn: #8a5a12;
+      --sclera: #fff; --iris: #2f6fed; --lid: #1b1f24;
+      --shadow: 0 1px 3px rgba(20,20,30,.08), 0 8px 24px rgba(20,20,30,.06);
+      --radius: 14px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #14161a; --card: #1e2126; --text: #eef0f2; --muted: #a2aab5;
+        --border: #33383f; --accent: #5b8cff; --accent-2: #a585ff;
+        --accent-soft: #202940; --warn-soft: #3a2c11; --warn: #e2a63b;
+        --sclera: #eef0f2; --iris: #5b8cff; --lid: #0c0d10;
+        --shadow: 0 1px 3px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.25);
+      }
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; background: var(--bg); color: var(--text);
+           font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    a { color: var(--accent); }
+    code { background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; font-size: .92em; }
+
+    /* ---- hero ---- */
+    .hero { text-align: center; padding: 48px 16px 88px; color: #fff;
+            background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+    .eyes { display: flex; justify-content: center; gap: 22px; margin-bottom: 18px; }
+    .eye { width: 92px; height: 92px; }
+    .eye .sclera { fill: var(--sclera); }
+    .eye .iris { fill: var(--iris); }
+    .eye .pupil { fill: #0c1220; }
+    .eye .glint { fill: #fff; opacity: .85; }
+    .eye .lid { fill: var(--lid); transform-origin: 50% 0; transform: scaleY(0);
+                transition: transform 90ms ease-in; }
+    .blink .lid { transform: scaleY(1); }
+    .look { transition: transform 120ms ease-out; }
+    .hero h1 { margin: 0; font-size: clamp(1.9rem, 5vw, 2.6rem); letter-spacing: -.02em; }
+    .hero p { margin: 8px auto 0; max-width: 480px; opacity: .92; }
+
+    /* ---- content ---- */
+    main { max-width: 720px; margin: -56px auto 0; padding: 0 16px 48px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+            box-shadow: var(--shadow); padding: 24px; margin-bottom: 20px; }
+    .card h2 { margin: 0 0 14px; font-size: 1.2rem; }
+    .steps { list-style: none; padding: 0; margin: 0; counter-reset: s; }
+    .steps li { position: relative; padding: 0 0 14px 44px; counter-increment: s; }
+    .steps li::before { content: counter(s); position: absolute; left: 0; top: -1px;
+      width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+      background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: .9rem; }
+    .steps li b { display: block; }
+    .steps li span { color: var(--muted); }
+
+    .install { text-align: center; padding: 8px 0 4px; }
+    .btn { display: inline-flex; align-items: center; gap: 10px; border: 0; cursor: pointer;
+           padding: 14px 30px; border-radius: 999px; font: inherit; font-weight: 600; font-size: 1.05rem; line-height: 1; color: #fff;
+           background: linear-gradient(135deg, var(--accent), var(--accent-2));
+           box-shadow: 0 6px 18px rgba(47,111,237,.35); transition: transform .15s, box-shadow .15s; }
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(47,111,237,.45); }
+    .btn:active { transform: translateY(0); }
+    .btn svg { width: 20px; height: 20px; }
+    .hint { color: var(--muted); font-size: .88rem; margin: 10px 0 0; }
+    .notice { background: var(--warn-soft); color: var(--warn); border-radius: 10px;
+              padding: 12px 16px; display: block; text-align: left; }
+
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+    .option { border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+    .option h3 { margin: 0 0 6px; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
+    .option h3 svg { width: 20px; height: 20px; color: var(--accent); }
+    .option p { margin: 0 0 10px; color: var(--muted); font-size: .94rem; }
+    .dl { display: flex; flex-wrap: wrap; gap: 8px; }
+    .dl a { text-decoration: none; font-size: .88rem; font-weight: 600; padding: 6px 12px;
+            border-radius: 8px; background: var(--accent-soft); }
+    .keep { margin: 0 0 16px; color: var(--muted); }
+
+    /* ---- channel picker ---- */
+    .channels { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 22px; }
+    .channel { position: relative; display: block; cursor: pointer; border: 2px solid var(--border);
+               border-radius: 12px; padding: 14px 16px 14px 44px; transition: border-color .15s, background .15s; }
+    .channel input { position: absolute; opacity: 0; }
+    .channel::before { content: ""; position: absolute; left: 16px; top: 17px; width: 16px; height: 16px;
+                       border-radius: 50%; border: 2px solid var(--border); }
+    .channel:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+    .channel:has(input:checked)::before { border-color: var(--accent);
+                                          background: radial-gradient(var(--accent) 45%, transparent 50%); }
+    .channel:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .channel:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+    .channel b { display: block; }
+    .channel .v { display: block; font-size: .85rem; font-variant-numeric: tabular-nums; color: var(--accent); }
+    .channel small { display: block; color: var(--muted); margin-top: 2px; }
+    @media (max-width: 480px) { .channels { grid-template-columns: 1fr; } }
+
+    details { border-top: 1px solid var(--border); padding: 12px 0; }
+    details:first-of-type { border-top: 0; padding-top: 0; }
+    summary { cursor: pointer; font-weight: 600; }
+    details p, details ul { color: var(--muted); margin: 8px 0 0; }
+    details ul { padding-left: 1.2em; }
+
+    footer { text-align: center; color: var(--muted); font-size: .88rem; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .look, .lid, .btn { transition: none; }
+    }
+  </style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyes" aria-hidden="true">
+    <svg class="eye" viewBox="0 0 100 100">
+      <defs><clipPath id="c1"><circle cx="50" cy="50" r="46"/></clipPath></defs>
+      <circle class="sclera" cx="50" cy="50" r="46"/>
+      <g class="look"><circle class="iris" cx="50" cy="50" r="22"/><circle class="pupil" cx="50" cy="50" r="11"/><circle class="glint" cx="57" cy="42" r="4.5"/></g>
+      <rect class="lid" x="0" y="0" width="100" height="100" clip-path="url(#c1)"/>
+    </svg>
+    <svg class="eye" viewBox="0 0 100 100">
+      <defs><clipPath id="c2"><circle cx="50" cy="50" r="46"/></clipPath></defs>
+      <circle class="sclera" cx="50" cy="50" r="46"/>
+      <g class="look"><circle class="iris" cx="50" cy="50" r="22"/><circle class="pupil" cx="50" cy="50" r="11"/><circle class="glint" cx="57" cy="42" r="4.5"/></g>
+      <rect class="lid" x="0" y="0" width="100" height="100" clip-path="url(#c2)"/>
+    </svg>
+  </div>
+  <h1>ESP Magic Eyes</h1>
+  <p>Install or update the firmware straight from your browser. No software needed.</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Install</h2>
+    <div class="channels" role="radiogroup" aria-label="Firmware version">
+      <label class="channel">
+        <input type="radio" name="channel" value="stable">
+        <b>Stable</b><span class="v" data-ver="stable">checking…</span>
+        <small>The latest release. Recommended.</small>
+      </label>
+      <label class="channel">
+        <input type="radio" name="channel" value="latest">
+        <b>Latest</b><span class="v" data-ver="latest">checking…</span>
+        <small>Newest changes from the main branch; may be less tested.</small>
+      </label>
+    </div>
+    <ol class="steps">
+      <li><b>Plug in the board</b><span>Connect the ESP32 to this computer with a USB data cable.</span></li>
+      <li><b>Click Connect</b><span>Pick the board's serial port in the list that pops up.</span></li>
+      <li><b>Choose Install</b><span>On a new board, allow it to erase the device first.</span></li>
+    </ol>
+    <div class="install">
+      <esp-web-install-button id="installer">
+        <button slot="activate" class="btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 7V3h4v4M8 7h8v6a4 4 0 0 1-8 0zM12 17v4"/></svg>
+          Connect
+        </button>
+        <span slot="unsupported" class="notice">
+          Your browser can't talk to USB devices. Open this page in
+          <b>Chrome</b> or <b>Edge</b> on a computer (phones and Firefox/Safari aren't supported).
+        </span>
+        <span slot="not-allowed" class="notice">
+          Web flashing only works on a secure (https) page.
+        </span>
+      </esp-web-install-button>
+      <p class="notice" id="no-firmware" hidden>No firmware is published here yet. Please check back later.</p>
+      <p class="hint">Works in Chrome and Edge on Windows, macOS, Linux and ChromeOS.</p>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Update a device that's already set up</h2>
+    <p class="keep">Your WiFi, calibration, radar type and passwords are kept either way.</p>
+    <div class="grid">
+      <div class="option">
+        <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 7V3h4v4M8 7h8v6a4 4 0 0 1-8 0zM12 17v4"/></svg>Over USB</h3>
+        <p>Use <b>Connect</b> above and choose <b>Install</b>, but <b>don't</b> tick "erase device".</p>
+      </div>
+      <div class="option">
+        <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M2 9a15 15 0 0 1 20 0"/><circle cx="12" cy="19.5" r="1"/></svg>Over WiFi</h3>
+        <p>Download both files for the version picked above, then upload them on the device's
+           <b>Setup → Firmware update</b> page.</p>
+        <div class="dl">
+          <a id="dl-fw" href="#" download>firmware.bin</a>
+          <a id="dl-fs" href="#" download>littlefs.bin</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Help</h2>
+    <details>
+      <summary>No serial port shows up</summary>
+      <ul>
+        <li>Try another cable. Some USB cables only charge and can't carry data.</li>
+        <li>Install the USB driver for your board's chip, usually
+            <a href="https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers">CP210x</a> or
+            <a href="https://www.wch-ic.com/downloads/CH341SER_EXE.html">CH340</a>.</li>
+      </ul>
+    </details>
+    <details>
+      <summary>It hangs at "Connecting…"</summary>
+      <p>Hold the board's <b>BOOT</b> button while you click Install, and let go once
+         the progress bar starts.</p>
+    </details>
+    <details>
+      <summary>What next, after installing?</summary>
+      <p>The device starts a WiFi network named <code>MagicEyes-Setup-XXXX</code>
+         (password <code>eyes-setup</code>). Connect to it to give the device your
+         home WiFi details. The
+         <a href="https://github.com/marcelrv/esp_magic_eyes#2-connect-it-to-your-wifi">README</a>
+         has the full walkthrough.</p>
+    </details>
+  </section>
+
+  <footer>
+    <a href="https://github.com/marcelrv/esp_magic_eyes">ESP Magic Eyes on GitHub</a>
+  </footer>
+</main>
+
+<script>
+  // Each channel is a directory with its own manifest.json + .bin files
+  // (see .github/workflows/webflash.yml). "stable" is missing until the
+  // first release; neither exists when this file is opened locally.
+  const installer = document.getElementById("installer");
+  const radios = [...document.querySelectorAll('input[name="channel"]')];
+  let saved = null;
+  try { saved = localStorage.getItem("channel"); } catch {}
+
+  function select(ch) {
+    radios.forEach(r => r.checked = r.value === ch);
+    installer.manifest = ch + "/manifest.json";
+    installer.setAttribute("manifest", installer.manifest);
+    document.getElementById("dl-fw").href = ch + "/firmware.bin";
+    document.getElementById("dl-fs").href = ch + "/littlefs.bin";
+  }
+  radios.forEach(r => r.addEventListener("change", () => {
+    select(r.value);
+    try { localStorage.setItem("channel", r.value); } catch {}
+  }));
+
+  Promise.all(radios.map(r =>
+    fetch(r.value + "/manifest.json").then(res => res.ok ? res.json() : null).catch(() => null)
+      .then(m => {
+        document.querySelector(`[data-ver="${r.value}"]`).textContent = m ? m.version : "not available yet";
+        r.disabled = !m;
+        return m ? r.value : null;
+      })
+  )).then(found => {
+    const avail = found.filter(Boolean);
+    if (avail.length) {
+      select(avail.includes(saved) ? saved : avail[0]);
+    } else {
+      // Nothing to flash (or the page is opened locally): no dead button.
+      installer.hidden = true;
+      document.getElementById("no-firmware").hidden = false;
+    }
+  });
+
+  // The eyes follow the pointer and blink now and then, like the real thing.
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const eyes = [...document.querySelectorAll(".eye")];
+  if (!still) {
+    addEventListener("pointermove", e => {
+      for (const eye of eyes) {
+        const r = eye.getBoundingClientRect();
+        const dx = e.clientX - (r.left + r.width / 2);
+        const dy = e.clientY - (r.top + r.height / 2);
+        const k = Math.min(1, Math.hypot(dx, dy) / 300) * 20 / (Math.hypot(dx, dy) || 1);
+        eye.querySelector(".look").style.transform = `translate(${dx * k}px, ${dy * k}px)`;
+      }
+    });
+    const blink = () => {
+      eyes.forEach(e => e.classList.add("blink"));
+      setTimeout(() => eyes.forEach(e => e.classList.remove("blink")), 140);
+      setTimeout(blink, 2500 + Math.random() * 4000);
+    };
+    setTimeout(blink, 1500);
+  }
+</script>
+</body>
+</html>

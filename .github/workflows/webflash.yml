@@ -1,0 +1,94 @@
+# Web flasher: publishes the ESP Web Tools install page from webflash/ to
+# GitHub Pages with two firmware channels the user can pick from:
+#   latest/  built from the current main
+#   stable/  the newest (non-prerelease) GitHub Release
+# Pushing a v* tag builds that tag and attaches the files to its Release
+# (tags with a "-", e.g. v1.2.0-rc1, become prereleases and not "stable"),
+# then redeploys the site so "stable" picks it up.
+#
+# One-time repo setup: Settings -> Pages -> Source: "GitHub Actions".
+
+name: Web flasher
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/pio-build
+      - name: Collect files
+        run: bash webflash/assemble.sh out "$GITHUB_REF_NAME"
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=$GITHUB_REF_NAME
+          PRE=""; [[ "$TAG" == *-* ]] && PRE="--prerelease"
+          gh release view "$TAG" >/dev/null 2>&1 ||
+            gh release create "$TAG" --verify-tag --generate-notes $PRE
+          gh release upload "$TAG" out/* --clobber
+
+  pages:
+    needs: release
+    # Also runs on plain main pushes, where "release" is skipped.
+    if: ${{ !cancelled() && needs.release.result != 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    # Never cancel a running Pages deploy halfway; queue the next one.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # "latest" is always main, even when a tag push triggered this run.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: ./.github/actions/pio-build
+
+      - name: Assemble site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p site
+          cp webflash/index.html site/
+
+          VER=$(sed -n 's/.*FIRMWARE_VERSION = "\(.*\)".*/\1/p' include/version.h)
+          bash webflash/assemble.sh site/latest "$VER+$(git rev-parse --short HEAD)"
+
+          # "stable" = the newest non-prerelease release, used as built
+          # (its manifest carries that tag's own partition offsets). No
+          # release yet -> no stable/ dir, and the page offers latest only.
+          if gh release download --repo "$GITHUB_REPOSITORY" --dir site/stable \
+               --pattern '*.bin' --pattern manifest.json 2>/dev/null &&
+             [ -f site/stable/manifest.json ]; then
+            echo "stable: $(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)"
+          else
+            rm -rf site/stable
+            echo "stable: no release with web flasher files yet"
+          fi
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

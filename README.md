@@ -15,7 +15,11 @@ The eyes can move on their own (looking around, blinking, "sleeping"), react whe
 
 ### 1. Flash the firmware
 
-You'll need a computer with [Visual Studio Code](https://code.visualstudio.com/) and the [PlatformIO extension](https://platformio.org/platformio-ide) installed — both are free. Then:
+**The easy way — from your browser.** Open the [web installer](https://marcelrv.github.io/esp_magic_eyes/) in Chrome or Edge on a computer, plug the ESP32 in with a USB cable, click **Connect** and follow the steps. Nothing to install. Pick **Stable** (the latest release, recommended) or **Latest** (the newest changes, less tested).
+
+**Updating later** works the same way. Choose **Install**, but don't tick "erase device", and your WiFi, calibration and passwords are kept. Or download `firmware.bin` and `littlefs.bin` from the installer page and upload both on the device's **Setup → Firmware update** page over WiFi.
+
+**Building it yourself.** You'll need a computer with [Visual Studio Code](https://code.visualstudio.com/) and the [PlatformIO extension](https://platformio.org/platformio-ide) installed — both are free. Then:
 
 1. Open this project folder in VS Code.
 2. Connect the ESP32 board to your computer with a USB cable.
