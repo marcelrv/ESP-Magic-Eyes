@@ -282,7 +282,7 @@ Two 1.5MB OTA app slots, ~960KB LittleFS (as built, the frontend + data files us
 ## 9. Project Layout & Toolchain
 
 ```
-esp_magic_eyes/
+ESP-Magic-Eyes/
   platformio.ini          single env:esp32dev (radar type is a runtime setting)
   partitions.csv
   .vscode/                 PlatformIO-generated IDE config
