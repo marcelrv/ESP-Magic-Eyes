@@ -1,6 +1,7 @@
 #include "net/ota_manager.h"
 
 #include <ArduinoOTA.h>
+#include <ESPmDNS.h>
 
 #include <atomic>
 
@@ -9,6 +10,10 @@
 #include "storage/nvs_store.h"
 
 namespace {
+
+// ArduinoOTA's ESP32 default, set explicitly because the mDNS advert
+// below has to name the same port.
+constexpr uint16_t kOtaPort = 3232;
 
 bool gEnabledCached = true;
 bool gStarted = false;
@@ -58,7 +63,15 @@ void startOta() {
     Serial.println(static_cast<int>(error));
   });
 
+  // WifiManager owns mDNS (see startMdnsOnce()): with ArduinoOTA's own mDNS
+  // on, its end() would take <hostname>.local down with it. Only add or
+  // remove the "_arduino" service that IDE network-port discovery uses.
+  ArduinoOTA.setMdnsEnabled(false);
+  ArduinoOTA.setPort(kOtaPort);
   ArduinoOTA.begin();
+  if (WifiManager::mdnsRunning()) {
+    MDNS.enableArduino(kOtaPort, gAppliedMd5.length() > 0);
+  }
   gStarted = true;
   Serial.print("[OTA] ArduinoOTA started, hostname=");
   Serial.println(hostname);
@@ -66,6 +79,9 @@ void startOta() {
 
 void stopOta() {
   ArduinoOTA.end();
+  if (WifiManager::mdnsRunning()) {
+    MDNS.disableArduino();
+  }
   gStarted = false;
   Serial.println("[OTA] ArduinoOTA stopped.");
 }
