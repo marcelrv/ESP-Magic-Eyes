@@ -79,6 +79,8 @@ From the **Control** section:
   </tr>
 </table>
 
+<p align="center"><img src="docs/images/gestures.png" width="420" alt="Natural mode switch and gesture buttons: blink, winks, surprise, sleepy, squint, look around, double blink, roll eyes"><br><sub>Gestures and natural mode, further down the Manual control page</sub></p>
+
 ## Setup & maintenance
 
 From the **Setup** section:
