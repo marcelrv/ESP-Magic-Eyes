@@ -267,25 +267,45 @@
     }
   });
 
-  // The eyes follow the pointer and blink now and then, like the real thing.
+  // The eyes follow the pointer and blink now and then, like the real thing,
+  // and glance around on their own while the pointer is idle (always, on a
+  // phone). Reduced motion (e.g. Windows "Animation effects" off) only drops
+  // the smooth transitions (CSS) and the idle glancing: following and
+  // blinking react to the user, so they stay.
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const eyes = [...document.querySelectorAll(".eye")];
+  const look = (x, y) => eyes.forEach(eye =>
+    eye.querySelector(".look").style.transform = `translate(${x}px, ${y}px)`);
+  let lastPointer = 0;
+
+  addEventListener("pointermove", e => {
+    lastPointer = Date.now();
+    for (const eye of eyes) {
+      const r = eye.getBoundingClientRect();
+      const dx = e.clientX - (r.left + r.width / 2);
+      const dy = e.clientY - (r.top + r.height / 2);
+      const k = Math.min(1, Math.hypot(dx, dy) / 300) * 20 / (Math.hypot(dx, dy) || 1);
+      eye.querySelector(".look").style.transform = `translate(${dx * k}px, ${dy * k}px)`;
+    }
+  });
+
+  const blink = () => {
+    eyes.forEach(e => e.classList.add("blink"));
+    setTimeout(() => eyes.forEach(e => e.classList.remove("blink")), 140);
+    setTimeout(blink, 2500 + Math.random() * 4000);
+  };
+  setTimeout(blink, 1500);
+
   if (!still) {
-    addEventListener("pointermove", e => {
-      for (const eye of eyes) {
-        const r = eye.getBoundingClientRect();
-        const dx = e.clientX - (r.left + r.width / 2);
-        const dy = e.clientY - (r.top + r.height / 2);
-        const k = Math.min(1, Math.hypot(dx, dy) / 300) * 20 / (Math.hypot(dx, dy) || 1);
-        eye.querySelector(".look").style.transform = `translate(${dx * k}px, ${dy * k}px)`;
+    const glance = () => {
+      if (Date.now() - lastPointer > 3000) {
+        // Mostly look somewhere nearby, sometimes back to the centre.
+        if (Math.random() < 0.25) look(0, 0);
+        else look((Math.random() * 2 - 1) * 18, (Math.random() * 2 - 1) * 10);
       }
-    });
-    const blink = () => {
-      eyes.forEach(e => e.classList.add("blink"));
-      setTimeout(() => eyes.forEach(e => e.classList.remove("blink")), 140);
-      setTimeout(blink, 2500 + Math.random() * 4000);
+      setTimeout(glance, 1200 + Math.random() * 2500);
     };
-    setTimeout(blink, 1500);
+    setTimeout(glance, 800);
   }
 </script>
 </body>

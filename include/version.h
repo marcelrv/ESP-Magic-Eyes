@@ -2,7 +2,7 @@
 
 #pragma once
 
-constexpr const char *FIRMWARE_VERSION = "0.1.0";
+constexpr const char *FIRMWARE_VERSION = "0.2.0-dev";
 
 // __DATE__ / __TIME__ are compiler-substituted at the point of translation
 // (main.cpp / rest_routes.cpp), so the printable build timestamp is built
