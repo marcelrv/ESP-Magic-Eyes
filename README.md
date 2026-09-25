@@ -15,7 +15,7 @@ The eyes can move on their own (looking around, blinking, "sleeping"), react whe
 
 ### 1. Flash the firmware
 
-**The easy way — from your browser.** Open the [web installer](https://marcelrv.github.io/esp_magic_eyes/) in Chrome or Edge on a computer, plug the ESP32 in with a USB cable, click **Connect** and follow the steps. Nothing to install. Pick **Stable** (the latest release, recommended) or **Latest** (the newest changes, less tested).
+**The easy way — from your browser.** Open the [web installer](https://marcelrv.github.io/ESP-Magic-Eyes/) in Chrome or Edge on a computer, plug the ESP32 in with a USB cable, click **Connect** and follow the steps. Nothing to install. Pick **Stable** (the latest release, recommended) or **Latest** (the newest changes, less tested).
 
 **Updating later** works the same way. Choose **Install**, but don't tick "erase device", and your WiFi, calibration and passwords are kept. Or download `firmware.bin` and `littlefs.bin` from the installer page and upload both on the device's **Setup → Firmware update** page over WiFi.
 
