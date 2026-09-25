@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "net/auth.h"
 #include "net/wifi_manager.h"
 #include "pin_map.h"
 
@@ -31,7 +32,9 @@ void handle() {
   } else if (down && gPressed) {
     if (!gTriggered && (millis() - gPressStartMs) >= kLongPressMs) {
       gTriggered = true;
-      Serial.println("[Buttons] Factory-reset button held 5s — forgetting WiFi and rebooting.");
+      Serial.println("[Buttons] Factory-reset button held 5s — clearing passwords, forgetting WiFi, rebooting.");
+      // Physical access is the recovery path for forgotten passwords.
+      Auth::clearAll();
       WifiManager::forgetNetwork(); // reboots; does not return in practice
     }
   } else if (!down && gPressed) {

@@ -4,6 +4,7 @@
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
 
+#include "api/auth_routes.h"
 #include "api/eyes_routes.h"
 #include "api/gesture_routes.h"
 #include "api/led_routes.h"
@@ -13,6 +14,7 @@
 #include "api/rest_routes.h"
 #include "api/servo_routes.h"
 #include "api/wifi_routes.h"
+#include "net/auth.h"
 #include "net/wifi_manager.h"
 
 namespace {
@@ -60,6 +62,12 @@ void begin() {
   // data/sequences/*.json is intentionally NOT part of this served subtree
   // — it's read directly off LittleFS by firmware (PlayModeManager), not
   // served over HTTP.
+  // Every request, static files included, passes Auth's middleware before
+  // its handler runs; body/upload routes additionally check in their data
+  // callbacks (see net/auth.h for why both are needed).
+  gServer.addMiddleware(&Auth::middleware);
+
+  AuthRoutes::registerRoutes(gServer);
   RestRoutes::registerRoutes(gServer);
   OtaRoutes::registerRoutes(gServer);
   ServoRoutes::registerRoutes(gServer);

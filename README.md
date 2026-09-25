@@ -65,6 +65,18 @@ From the **Setup** section:
 - **Radar test** — choose which radar sensor is fitted (or none), and see a live view of what it is currently detecting, useful for checking it's wired correctly and positioned well.
 - **Firmware update** — update the device's software over WiFi, without needing to reconnect it to a computer. (You can also always update it the original way, by reconnecting the USB cable and using PlatformIO, as in the initial setup.)
 - **LED (optional)** — once a glow light is wired in, turn it on/off and choose its color and brightness here.
+- **Security** — set the passwords (see below).
+
+## Passwords
+
+Out of the box the device has no password, so anyone on your WiFi network can use it. The home page shows a warning until you set one. On **Setup → Security** you can set two separate passwords:
+
+- **Control password**: needed to open the pages at all and to move the eyes. When your browser asks you to log in, use the user name **`user`**.
+- **Admin password**: needed for the Setup pages, including WiFi, calibration and firmware updates. The user name is **`admin`**. The admin password also works for the everyday controls. If you set only a control password, it protects the Setup pages as well.
+
+Your browser remembers the login until you close it. If you update the firmware from PlatformIO over WiFi, add `upload_flags = --auth=<admin password>` to `platformio.ini` once an admin password is set.
+
+**Forgot a password?** With the device in hand, hold the **BOOT** button for 5 seconds. This removes both passwords, and also forgets the WiFi network, so you set that up again as in step 2. If you'd rather keep the WiFi settings, connect the USB cable and type `auth reset` in the serial monitor instead.
 
 ## Calibrating the eyes
 
@@ -89,7 +101,7 @@ When you're done, press **Resume motion** (or just leave the page — movement r
 
 ## Controlling it from something else
 
-Everything the web page does, it does by talking to the device over a simple web API — so anything that can make web requests (a phone shortcut, a voice assistant integration, a smart-home system, or a custom program) can drive the eyes the same way. If you're building an integration like that, see [architecture/ARCHITECTURE.md](architecture/ARCHITECTURE.md) for the full list of what it can be asked to do.
+Everything the web page does, it does by talking to the device over a simple web API — so anything that can make web requests (a phone shortcut, a voice assistant integration, a smart-home system, or a custom program) can drive the eyes the same way. If you've set passwords, the integration needs to log in with "digest" authentication (for example `curl --digest -u user:<password> ...`). If you're building an integration like that, see [architecture/ARCHITECTURE.md](architecture/ARCHITECTURE.md) for the full list of what it can be asked to do.
 
 ## Wiring and technical details
 

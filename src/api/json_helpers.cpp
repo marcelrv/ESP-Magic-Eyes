@@ -3,6 +3,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "net/auth.h"
+
 namespace JsonHelpers {
 
 void sendJson(AsyncWebServerRequest *request, const JsonDocument &doc) {
@@ -25,6 +27,12 @@ bool collectJsonBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, 
                      JsonDocument &doc) {
   if (request->getResponse() != nullptr) {
     return false; // already answered (e.g. rejected on an earlier chunk)
+  }
+  // Auth runs here, not only in the server middleware: the middleware runs
+  // after every body chunk, i.e. after the route would already have acted.
+  // Drop the body without answering; Auth::middleware() sends the 401.
+  if (!Auth::allowed(request)) {
+    return false;
   }
   if (total == 0) {
     // Transfer-Encoding: chunked — no Content-Length, so the end of the

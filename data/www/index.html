@@ -27,6 +27,11 @@
     <a class="btn btn-primary btn-block" href="setup/wifi.html">Configure WiFi &rarr;</a>
   </section>
 
+  <!-- Shown while no password is set (GET /api/auth/status needs none) -->
+  <div id="auth-warning" class="msg msg-warn hidden">This device has no password:
+    anyone on your network can control it and change its settings.
+    <a href="setup/security.html">Set passwords &rarr;</a></div>
+
   <!-- Normal dashboard -->
   <section id="dashboard" class="hidden">
     <div class="card">
@@ -76,6 +81,7 @@
         <a class="btn btn-block" href="setup/radar.html">Radar test</a>
         <a class="btn btn-block" href="setup/ota.html">Firmware update</a>
         <a class="btn btn-block" href="setup/led.html">LED</a>
+        <a class="btn btn-block" href="setup/security.html">Passwords</a>
       </div>
     </div>
   </section>
@@ -100,6 +106,10 @@
   var dashboard = document.getElementById('dashboard');
   var loadError = document.getElementById('load-error');
   var modePill = document.getElementById('mode-pill');
+
+  Api.getAuthStatus().then(function (auth) {
+    if (!auth.adminProtected) show(document.getElementById('auth-warning'));
+  }).catch(function () { /* older firmware without /api/auth — no banner */ });
 
   Promise.all([Api.getSystemStatus(), Api.getSystemInfo()])
     .then(function (results) {

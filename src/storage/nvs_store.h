@@ -175,4 +175,23 @@ struct LedColorConfig {
 LedColorConfig getLedColorConfig();
 void setLedColorConfig(const LedColorConfig &cfg);
 
+// --- auth namespace -----------------------------------------------------------
+// Password hashes for the two access levels (net/auth.h). An empty string
+// means that level has no password. adminHa1/userHa1 are HTTP Digest HA1
+// values (32 lowercase hex, MD5("<user>:<realm>:<password>")) — the realm
+// and usernames are constants in net/auth.cpp, so changing either would
+// invalidate every stored hash. otaMd5 is MD5(<admin password>), the form
+// ArduinoOTA's setPasswordHash() wants; it's derived from the same admin
+// password, so it's set and cleared together with adminHa1.
+struct AuthHashes {
+  String adminHa1;
+  String userHa1;
+  String otaMd5;
+};
+
+AuthHashes getAuthHashes();
+// Returns false if NVS could not be written — the old hashes stay in effect.
+bool setAuthHashes(const AuthHashes &hashes);
+void clearAuth();
+
 } // namespace NvsStore

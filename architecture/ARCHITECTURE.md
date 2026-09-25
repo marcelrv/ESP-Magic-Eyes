@@ -96,6 +96,7 @@ Layered design:
 - Lids: three measured points — normalized 0.0 = `closedUs` (upper and lower lid just touching), 0.5 = `halfUs`, 1.0 = `openUs` — mapped piecewise linearly, because the lid linkages are non-linear and differ per eye. The points encode direction, so `inverted` does not apply to lids. `halfUs` must lie strictly between closed and open.
 - Every servo is `attach()`ed with ESP32Servo's full 500–2500 µs range, so the calibration page can probe past the saved limits via `ServoHal::setRawPulseUs()` (clamped only to 500–2500).
 - `led` namespace: one packed blob holding `brightness`/`colorL`/`colorR`/`effect`.
+- `auth` namespace: `adminHa1`, `userHa1` (HTTP Digest HA1, `MD5("<user>:ESP Magic Eyes:<password>")`) and `otaMd5` (`MD5(<admin password>)` for ArduinoOTA). A missing key means that level has no password. Only hashes are stored. The realm and the usernames `admin`/`user` are baked into the hashes, so changing them would invalidate every stored password.
 
 **LittleFS** — frontend + data files, mounted from the custom partition (see §8), served at URL root from the `/www/` directory within the filesystem image:
 - `/www/...` — the web frontend (`index.html`, `css/`, `js/`, `control/`, `setup/`)
@@ -105,12 +106,12 @@ Layered design:
 
 ## 4. REST API
 
-Base path `/api`. All bodies JSON (ArduinoJson v7 `JsonDocument` — v7 removed `StaticJsonDocument`/`DynamicJsonDocument` in favor of a single heap-backed `JsonDocument`, which is used consistently across every route file). Response helpers are centralized in `src/api/json_helpers.h/.cpp` (added during the Phase 8 integration pass to de-duplicate what had been 7 near-identical implementations).
+Base path `/api`. Every route needs the **Control** or **Admin** password once that level has one (see §4a). All bodies JSON (ArduinoJson v7 `JsonDocument` — v7 removed `StaticJsonDocument`/`DynamicJsonDocument` in favor of a single heap-backed `JsonDocument`, which is used consistently across every route file). Response helpers are centralized in `src/api/json_helpers.h/.cpp` (added during the Phase 8 integration pass to de-duplicate what had been 7 near-identical implementations).
 
 **System**
 - `GET /api/system/info` — firmware version, build date, chip id, uptime, free heap, radar model compiled in, `otaNetworkEnabled`, `ledEnabled`
 - `GET /api/system/status` — current play mode, WiFi mode/IP, `naturalMode`, current pose snapshot
-- `POST /api/system/config` `{otaNetworkEnabled?, naturalMode?}` — partial update
+- `POST /api/system/config` `{otaNetworkEnabled?, naturalMode?}` — partial update (admin; the manual page uses `/api/eyes/natural` for the natural-mode toggle)
 - `POST /api/system/reboot`
 
 **WiFi / Setup**
@@ -127,6 +128,7 @@ Base path `/api`. All bodies JSON (ArduinoJson v7 `JsonDocument` — v7 removed 
 **Manual eye control**
 - `POST /api/eyes/gaze` `{pan, tilt, durationMs, easing}` — degrees, ±45° convention (see §6's degrees-to-pulse mapping), `source=Manual`
 - `POST /api/eyes/eyelids` `{upperL?, lowerL?, upperR?, lowerR?, durationMs}` — normalized 0 (closed) .. 1 (open), each field optional/partial
+- `POST /api/eyes/natural` `{enabled}` — natural-mode toggle, control level
 - `GET /api/eyes/pose` — current pose snapshot
 
 **Gestures**
@@ -150,7 +152,41 @@ Base path `/api`. All bodies JSON (ArduinoJson v7 `JsonDocument` — v7 removed 
 - `POST /api/ota/firmware` — multipart upload, streams into `Update.write()` (`U_FLASH`)
 - `POST /api/ota/filesystem` — multipart upload of a LittleFS image (`U_SPIFFS` — this is the correct `Update.h` mode constant for the LittleFS-backed partition too, not a typo)
 - `GET /api/ota/status` — result of the last OTA attempt
-- ArduinoOTA (network/IDE OTA) runs independently on port 3232, always attempted once WiFi reaches `STA_CONNECTED` (toggleable via `otaNetworkEnabled`)
+- ArduinoOTA (network/IDE OTA) runs independently on port 3232, always attempted once WiFi reaches `STA_CONNECTED` (toggleable via `otaNetworkEnabled`). Requires the admin password when one is set (`upload_flags = --auth=...`).
+
+**Auth**
+- `GET /api/auth/status` — public: `{controlPassword, adminPassword, adminProtected, otaRestartRequired}`
+- `POST /api/auth/password` `{level: "control"|"admin", password}` — admin; `""` clears that level, otherwise 4–64 characters. The password crosses the network in plain text here (no TLS).
+
+### 4a. Password protection
+
+`src/net/auth.*`. Two levels, each **open until its password is set**:
+
+| Level | Username | Covers |
+|---|---|---|
+| Public | — | `GET /api/auth/status` only |
+| Control | `user` (or `admin`) | static pages outside `/setup`, `/api/eyes/*`, `/api/gestures*`, `/api/playmodes*`, `/api/system/info`, `/api/system/status`, `/api/radar/status`, `/api/radar/latest` |
+| Admin | `admin` (or `user` while no admin password is set) | `/setup/*`, `/api/wifi/*`, `/api/servos/*`, `/api/radar/config`, `/api/led/*`, `/api/ota/*`, `/api/system/reboot`, `/api/system/config`, `/api/auth/password`, ArduinoOTA |
+
+The level comes from the URL alone (`Auth::requiredLevel()`); a URL containing `..`, `//` or `\` is treated as Admin, since LittleFS resolves `..`. HTTP **Digest** is used so the browser's own login prompt works for pages, `fetch` and XHR, and the password itself never crosses the network.
+
+**Two enforcement points.** ESPAsyncWebServer runs middleware only when the whole request has arrived, after every `onBody`/`onUpload` callback. Every POST handler here acts inside `onBody`, and web OTA writes flash inside `onUpload`, so a middleware-only check would act first and answer 401 afterwards. Therefore:
+- `Auth::middleware()` is registered on the server and sends the 401 challenge (or 429). This covers GETs, static files and POSTs without a body.
+- `JsonHelpers::collectJsonBody()` and the OTA upload handler call `Auth::allowed()` on every chunk. On failure they drop the data without responding, and the middleware then sends the single 401.
+
+New POST routes get this for free as long as they use `collectJsonBody()`. A route that reads a body or upload any other way must call `Auth::allowed()` itself.
+
+**Brute-force brake.** After 10 wrong credentials within 60 s, every protected request gets 429 for 30 s. A request with no `Authorization` header doesn't count.
+
+**ArduinoOTA** gets `setPasswordHash(otaMd5)` when it starts. It keeps the first password it is given until reboot, so after the admin password is changed or cleared, `OtaManager` leaves network OTA stopped until the next restart (it fails closed). `/api/auth/status` reports `otaRestartRequired`, and the Security page offers a restart.
+
+**Recovery** needs physical access: the BOOT-button 5 s hold (which also clears WiFi) or serial `auth reset`.
+
+**Known limitations:**
+- Plain HTTP: `POST /api/auth/password` carries the new password in clear text.
+- The library does not track the Digest nonces it issues, so a captured request can be replayed to the same method and URI.
+- Someone on the LAN can trigger the 429 lockout on purpose.
+- The setup AP password (`eyes-setup`) is still hard-coded.
 
 ---
 
@@ -204,9 +240,10 @@ data/www/
     radar.html            live radar visualization/test page
     ota.html               firmware/filesystem upload with progress bar, current version display
     led.html                LED enable/brightness/color/effect config
+    security.html           control/admin passwords
 ```
 
-The `/setup/*` vs `/control/*` structural + visual (color-theme) separation stands in place of authentication for v1 (deliberately chosen — see the project's design decisions) — auth could be layered onto `/setup/*` and the relevant `/api/*` routes later without restructuring, since the split already exists.
+The `/setup/*` vs `/control/*` split also marks the password boundary: `/setup/*` and its API routes need the admin password, and everything else needs the control password (§4a). No page has login code: the browser handles the Digest challenge itself. `index.html` shows a warning while no password is set.
 
 **Serving note**: the LittleFS filesystem image root (as `pio run -t buildfs` packs it) is the *contents* of `data/`, so the frontend actually lives at FS path `/www/*`. `web_server.cpp` serves `LittleFS "/www/"` at URL `"/"` — this was fixed during the Phase 8 integration review after being missed in Phase 7 (which validated pages via a local static file server, not the real device-served path).
 
@@ -229,7 +266,7 @@ Two 1.5MB OTA app slots, ~960KB LittleFS (as built, the frontend + data files us
 
 **Note**: the partition's SubType is `spiffs`, not `littlefs` — the pinned toolchain's `esptoolpy` (4.5.1) doesn't recognize `littlefs` as a valid SubType keyword (added in a later esptool/IDF release). The partition **name** is still `littlefs` and `board_build.filesystem = littlefs` in `platformio.ini` still makes it mount and format as LittleFS — only the CSV's SubType label differs from what a newer toolchain would allow.
 
-- **Network OTA**: `ArduinoOTA`, toggleable, enables `pio run -t upload --upload-port <device-ip>` directly from VSCode/PlatformIO.
+- **Network OTA**: `ArduinoOTA`, toggleable, enables `pio run -t upload --upload-port <device-ip>` directly from VSCode/PlatformIO. With an admin password set, this also needs `upload_flags = --auth=<admin password>` (§4a).
 - **Web OTA**: `setup/ota.html` + `/api/ota/firmware` / `/api/ota/filesystem`, hand-written against `Update.h` (no ready-made drop-in like ElegantOTA was found to be confirmed-compatible with the ESPAsyncWebServer fork in use, so this is a small first-party handler).
 - Both app slots mean a failed OTA can roll back; `Update.h` handles the slot-switch/verify automatically.
 
@@ -246,9 +283,10 @@ esp_magic_eyes/
   src/
     main.cpp
     hal/                    servo_hal.*, led_controller.*, buttons.*
-    net/                    wifi_manager.*, ota_manager.*, web_server.*
+    net/                    wifi_manager.*, ota_manager.*, web_server.*, auth.*, serial_console.*
     api/                    rest_routes.*, ota_routes.*, servo_routes.*, eyes_routes.*, gesture_routes.*,
-                             playmode_routes.*, radar_routes.*, led_routes.*, wifi_routes.*, json_helpers.*
+                             playmode_routes.*, radar_routes.*, led_routes.*, wifi_routes.*, auth_routes.*,
+                             json_helpers.*
     motion/                 eye_pose.*, command_queue.*, motion_task.*, natural_mode.*, gesture_engine.*,
                              playmode_manager.*
     radar/                  iradar_sensor.h, ld2420_sensor.*, ld2450_sensor.*, radar_task.*
@@ -299,10 +337,10 @@ All nine build phases (scaffold → integration) are complete. PROGRESS.md is th
 
 **Hardware-verified** (LD2420 board): WiFi setup, fallback and recovery (including a wrong password via the API), calibration (hold, NVS migration, half-open point), gestures and abort-restore, sticky manual eyelids, greeting → idle, web OTA (including recovery from an interrupted upload), serial console.
 
-**Not yet verified on hardware:** LD2450 decoding and tracking, `millis()` wrap (~49.7 days), NVS write-failure handling, and the PR #2 changes (runtime radar selection, AP kept up during retries, async fallback scan, pulse-exact calibration-hold exit, per-request body buffers).
+**Not yet verified on hardware:** LD2450 decoding and tracking, `millis()` wrap (~49.7 days), NVS write-failure handling, the PR #2 changes (runtime radar selection, AP kept up during retries, async fallback scan, pulse-exact calibration-hold exit, per-request body buffers), and password protection (§4a) in any respect: browser prompts, body/upload guards, lockout, ArduinoOTA `--auth`, and recovery.
 
 **Deliberately deferred:**
-- Authentication for `/setup/*`, the API and web OTA; ArduinoOTA has no password (see §7).
+- HTTPS, and a configurable setup-AP password (see §4a's known limitations).
 - WebSocket telemetry (`/ws`) — REST polling only (see §2).
 - Optional motion extras from the original plan: pan-based asymmetric lid tightening during fast saccades (`TODO` in `natural_mode.h`), saccade blink-through (auto-blink on a >~25° gaze jump), and curious mode's asymmetric lid narrowing.
 

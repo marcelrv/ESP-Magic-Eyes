@@ -34,7 +34,11 @@ mechanism: 6 servos, optional mmWave radar, optional RGB LEDs.
 ## Conventions
 - POST routes: `server.on(path, HTTP_POST, JsonHelpers::requireBody, nullptr, handler)`
   and start the handler with `JsonHelpers::collectJsonBody()`. No global
-  body buffers.
+  body buffers. That call is also the route's password check: the auth
+  middleware only runs after the body callbacks. A route that reads a
+  body/upload any other way must call `Auth::allowed()` itself, and a new
+  admin-only URL needs adding to `kAdminPrefixes` in `src/net/auth.cpp`
+  (ARCHITECTURE.md §4a).
 - Settings that change hardware setup (radar type/baud) are saved, then
   applied by a deferred `ESP.restart()` after the response is sent.
 - NVS values persist across firmware versions: never renumber stored enums;

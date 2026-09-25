@@ -11,6 +11,7 @@ constexpr const char *kWifiNamespace = "wifi";
 constexpr const char *kSystemNamespace = "system";
 constexpr const char *kServoCalNamespace = "servocal";
 constexpr const char *kLedNamespace = "led";
+constexpr const char *kAuthNamespace = "auth";
 
 constexpr const char *kKeySsid = "ssid";
 constexpr const char *kKeyPassword = "password";
@@ -24,6 +25,9 @@ constexpr const char *kKeyRadarBaud = "radarBaud";
 constexpr const char *kKeyRadarType = "radarType";
 constexpr const char *kKeyServoCalTable = "calTable";
 constexpr const char *kKeyLedConfig = "cfg";
+constexpr const char *kKeyAdminHa1 = "adminHa1";
+constexpr const char *kKeyUserHa1 = "userHa1";
+constexpr const char *kKeyOtaMd5 = "otaMd5";
 
 constexpr const char *kDefaultHostname = "esp-magic-eyes";
 constexpr const char *kDefaultDeviceName = "Magic Eyes";
@@ -35,6 +39,7 @@ Preferences wifiPrefs;
 Preferences systemPrefs;
 Preferences servoCalPrefs;
 Preferences ledPrefs;
+Preferences authPrefs;
 
 // NvsStore is called from several tasks — loop() (WifiManager, serial
 // console), the AsyncTCP task (every API route) and setup(). The shared
@@ -358,6 +363,49 @@ void setLedColorConfig(const LedColorConfig &cfg) {
   ledPrefs.begin(kLedNamespace, false);
   ledPrefs.putBytes(kKeyLedConfig, &cfg, sizeof(LedColorConfig));
   ledPrefs.end();
+}
+
+AuthHashes getAuthHashes() {
+  NvsLock lock;
+  AuthHashes hashes;
+  // Read-only begin() fails while the namespace has never been written
+  // (first boot) — that's "no passwords", the empty defaults.
+  if (authPrefs.begin(kAuthNamespace, true)) {
+    hashes.adminHa1 = authPrefs.getString(kKeyAdminHa1, "");
+    hashes.userHa1 = authPrefs.getString(kKeyUserHa1, "");
+    hashes.otaMd5 = authPrefs.getString(kKeyOtaMd5, "");
+    authPrefs.end();
+  }
+  return hashes;
+}
+
+bool setAuthHashes(const AuthHashes &hashes) {
+  NvsLock lock;
+  if (!authPrefs.begin(kAuthNamespace, false)) {
+    return false;
+  }
+  // putString() returns the bytes written, 0 on failure — but also 0 for an
+  // empty string, so an empty value is stored as a removed key instead.
+  auto put = [](const char *key, const String &value) {
+    if (value.length() == 0) {
+      authPrefs.remove(key);
+      return true;
+    }
+    return authPrefs.putString(key, value) == value.length();
+  };
+  bool ok = put(kKeyAdminHa1, hashes.adminHa1);
+  ok = put(kKeyUserHa1, hashes.userHa1) && ok;
+  ok = put(kKeyOtaMd5, hashes.otaMd5) && ok;
+  authPrefs.end();
+  return ok;
+}
+
+void clearAuth() {
+  NvsLock lock;
+  if (authPrefs.begin(kAuthNamespace, false)) {
+    authPrefs.clear();
+    authPrefs.end();
+  }
 }
 
 } // namespace NvsStore

@@ -184,7 +184,7 @@
   // --- Natural mode toggle --------------------------------------------------
   var naturalToggle = document.getElementById('natural-toggle');
   naturalToggle.addEventListener('change', function () {
-    Api.setSystemConfig({ naturalMode: naturalToggle.checked })
+    Api.setNaturalMode(naturalToggle.checked)
       .catch(function (err) { showMsg('Could not change natural mode: ' + err.message, 'error'); });
   });
 

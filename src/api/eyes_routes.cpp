@@ -9,6 +9,7 @@
 #include "motion/command_queue.h"
 #include "motion/eye_pose.h"
 #include "motion/motion_task.h"
+#include "motion/natural_mode.h"
 
 namespace {
 
@@ -116,6 +117,28 @@ void handleEyelidsBody(AsyncWebServerRequest *request, uint8_t *data, size_t len
   sendJson(request, doc);
 }
 
+// --- POST /api/eyes/natural ------------------------------------------------
+// {enabled} — the natural-mode toggle on the manual control page. It used
+// to go through POST /api/system/config, which is admin-only now that
+// passwords exist; this keeps it at control level without per-field
+// checks in that handler.
+void handleNaturalBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+  JsonDocument reqDoc;
+  if (!JsonHelpers::collectJsonBody(request, data, len, index, total, reqDoc)) {
+    return; // more chunks pending, or an error response was already sent
+  }
+  if (!reqDoc["enabled"].is<bool>()) {
+    sendJsonError(request, 400, "missing_enabled");
+    return;
+  }
+  NaturalModeCoupler::setEnabled(reqDoc["enabled"].as<bool>());
+
+  JsonDocument doc;
+  doc["success"] = true;
+  doc["naturalMode"] = NaturalModeCoupler::isEnabled();
+  sendJson(request, doc);
+}
+
 // --- GET /api/eyes/pose ----------------------------------------------------
 void handleGetPose(AsyncWebServerRequest *request) {
   EyePose pose = MotionTask::getCurrentPose();
@@ -137,6 +160,7 @@ void registerRoutes(AsyncWebServer &server) {
   server.on("/api/eyes/pose", HTTP_GET, handleGetPose);
   server.on("/api/eyes/gaze", HTTP_POST, JsonHelpers::requireBody, nullptr, handleGazeBody);
   server.on("/api/eyes/eyelids", HTTP_POST, JsonHelpers::requireBody, nullptr, handleEyelidsBody);
+  server.on("/api/eyes/natural", HTTP_POST, JsonHelpers::requireBody, nullptr, handleNaturalBody);
 }
 
 } // namespace EyesRoutes

@@ -51,7 +51,11 @@ constexpr size_t kMaxJsonBodyBytes = 4096;
 // (request->_tempObject), and returns true once the whole body has arrived
 // and parsed into `doc`. Returns false while more chunks are pending, and
 // also after it has sent an error response itself (chunked/oversized body,
-// out of memory, invalid JSON) — the caller just returns in both cases.
+// out of memory, invalid JSON), and when the request's credentials don't
+// meet the route's Auth level (the body is then ignored and
+// Auth::middleware() answers 401 once the request ends — see net/auth.h
+// for why the check can't live in the middleware alone). The caller just
+// returns in every case.
 bool collectJsonBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total,
                      JsonDocument &doc);
 

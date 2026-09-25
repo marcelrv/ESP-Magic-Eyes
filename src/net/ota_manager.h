@@ -12,6 +12,14 @@
 // (default true, see storage/nvs_store.h). The enabled flag is cached in
 // RAM at begin() (and whenever setEnabled() is called) rather than read
 // from NVS every loop() tick.
+//
+// Password: while an admin password is set (net/auth.h), ArduinoOTA
+// requires it — `pio run -t upload --upload-port <ip>` then needs
+// `upload_flags = --auth=<admin password>`. ArduinoOTA keeps the first
+// password it's given until reboot (its setPasswordHash() is a no-op once
+// one is set, and end() doesn't reset it), so after the admin password is
+// changed or cleared network OTA stays stopped until the next restart —
+// failing closed rather than accepting the old password.
 
 #pragma once
 
@@ -33,5 +41,10 @@ void handle();
 void setEnabled(bool enabled);
 
 bool isEnabled();
+
+// True while a changed/cleared admin password can't be applied to
+// ArduinoOTA until the device restarts (see header note). Safe to call
+// from any task.
+bool restartRequiredForPassword();
 
 } // namespace OtaManager

@@ -96,8 +96,11 @@ void handleSystemStatus(AsyncWebServerRequest *request) {
   JsonHelpers::sendJson(request, doc);
 }
 
-// POST /api/system/config — low-effort partial config endpoint, currently
-// only handles { "otaNetworkEnabled": bool } (Phase 2 scope).
+// POST /api/system/config — low-effort partial config endpoint for
+// { "otaNetworkEnabled": bool, "naturalMode": bool }. Admin-only (net/auth.cpp):
+// the manual page's natural-mode toggle uses control-level
+// POST /api/eyes/natural instead; naturalMode is still accepted here so
+// older callers keep working.
 
 void handleSystemConfigBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
   JsonDocument reqDoc;
