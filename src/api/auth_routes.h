@@ -2,7 +2,9 @@
 //
 //   GET  /api/auth/status   — public (no credentials needed), so every page
 //        can warn when the device is unprotected:
-//        {controlPassword, adminPassword, adminProtected, otaRestartRequired}
+//        {controlPassword, adminPassword, adminProtected, otaRestartRequired,
+//         storageError}. storageError: the stored passwords couldn't be
+//        read, so every protected request is refused (net/auth.cpp).
 //        adminProtected is true when *either* password is set, since admin
 //        routes fall back to the control password.
 //   POST /api/auth/password — admin. {level: "control"|"admin", password}.

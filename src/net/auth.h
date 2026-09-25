@@ -75,8 +75,9 @@ void middleware(AsyncWebServerRequest *request, ArMiddlewareNext next);
 // failure — the previous password then stays in effect.
 bool setPassword(Level level, const String &password);
 
-// Clears both passwords (BOOT-button hold, serial "auth reset").
-void clearAll();
+// Clears both passwords (BOOT-button hold, serial "auth reset"). Returns
+// false if NVS couldn't be written; the passwords then stay in effect.
+bool clearAll();
 
 // True if this level's own password is set.
 bool hasPassword(Level level);
@@ -84,6 +85,10 @@ bool hasPassword(Level level);
 // MD5 of the admin password for ArduinoOTA.setPasswordHash(), or "" when
 // no admin password is set.
 String otaPasswordMd5();
+
+// False while the stored hashes couldn't be loaded: every protected
+// request is refused and ArduinoOTA must not start (see auth.cpp).
+bool storageOk();
 
 // Bumped on every password change, so OtaManager can notice a new admin
 // password without copying the hash on every loop() pass.

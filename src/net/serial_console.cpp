@@ -112,8 +112,11 @@ void runCommand(const String &line) {
     if (sub == "status") {
       printAuthStatus();
     } else if (sub == "reset") {
-      Auth::clearAll();
-      Serial.println("Both passwords cleared. Network OTA picks this up after a reboot.");
+      if (Auth::clearAll()) {
+        Serial.println("Both passwords cleared. Network OTA picks this up after a reboot.");
+      } else {
+        Serial.println("FAILED to clear the passwords (NVS write error); they are unchanged.");
+      }
     } else {
       Serial.println("Unknown auth command. Try: auth status | auth reset");
     }

@@ -25,6 +25,11 @@ constexpr uint32_t kLockoutMs = 30000;
 
 SemaphoreHandle_t gMutex = nullptr;
 NvsStore::AuthHashes gHashes; // guarded by gMutex
+// True when the stored hashes couldn't be loaded (NVS error or corrupt
+// record). Every protected request is then refused rather than treated as
+// "no password" — failing open would unprotect the device. Only a
+// successful clearAll() (physical access) or setPassword() recovers.
+std::atomic<bool> gStorageFailed{false};
 std::atomic<uint32_t> gGeneration{0};
 
 // Failure/lockout state. Written only by middleware() (AsyncTCP task);
@@ -186,7 +191,13 @@ namespace Auth {
 
 void begin() {
   gMutex = xSemaphoreCreateMutex();
-  NvsStore::AuthHashes stored = NvsStore::getAuthHashes();
+  NvsStore::AuthHashes stored;
+  if (!NvsStore::getAuthHashes(stored)) {
+    gStorageFailed = true;
+    Serial.println("[Auth] Could not read stored passwords — refusing all protected requests. "
+                   "Use serial 'auth reset' or the BOOT-button hold to clear them.");
+    return;
+  }
   {
     AuthLock lock;
     gHashes = stored;
@@ -200,10 +211,12 @@ Level requiredLevel(AsyncWebServerRequest *request) {
   if (url == "/api/auth/status") {
     return Level::Public;
   }
-  // The static handler hands the path to LittleFS, which resolves "..";
-  // "/control/../setup/wifi.html" must not slip past the /setup prefix.
-  // Nothing legitimate uses these, so treat them as the strictest level.
-  if (url.indexOf("..") >= 0 || url.indexOf("//") >= 0 || url.indexOf('\\') >= 0) {
+  // The static handler hands the path to LittleFS, which resolves "." and
+  // ".." segments: "/./setup/wifi.html" or "/control/../setup/wifi.html"
+  // must not slip past the /setup prefix. "/." catches every dot segment
+  // (and hidden files); nothing legitimate uses these, "//" or backslashes,
+  // so treat them as the strictest level.
+  if (url.indexOf("/.") >= 0 || url.indexOf("..") >= 0 || url.indexOf("//") >= 0 || url.indexOf('\\') >= 0) {
     return Level::Admin;
   }
   for (const char *prefix : kAdminPrefixes) {
@@ -217,6 +230,9 @@ Level requiredLevel(AsyncWebServerRequest *request) {
 bool allowed(AsyncWebServerRequest *request, Level level) {
   if (level == Level::Public) {
     return true;
+  }
+  if (gStorageFailed) {
+    return false;
   }
   NvsStore::AuthHashes h = snapshot();
   if (!needsPassword(h, level)) {
@@ -284,22 +300,30 @@ bool setPassword(Level level, const String &password) {
     return false;
   }
   gHashes = updated;
+  gStorageFailed = false; // NVS is writable again and gHashes matches it
   ++gGeneration;
   Serial.printf("[Auth] %s password %s.\n", level == Level::Admin ? "Admin" : "Control",
                 password.length() ? "set" : "cleared");
   return true;
 }
 
-void clearAll() {
+bool clearAll() {
   {
     AuthLock lock; // held across the NVS write so a concurrent setPassword() can't interleave
-    NvsStore::clearAuth();
+    if (!NvsStore::clearAuth()) {
+      // Keep the live hashes: clearing only RAM would report success while
+      // the old passwords come back on the next boot.
+      Serial.println("[Auth] Clearing passwords FAILED (NVS write error) — passwords unchanged.");
+      return false;
+    }
     gHashes = NvsStore::AuthHashes{};
   }
+  gStorageFailed = false;
   ++gGeneration;
   gLockedOut = false;
   gFailures = 0;
   Serial.println("[Auth] All passwords cleared.");
+  return true;
 }
 
 bool hasPassword(Level level) {
@@ -312,6 +336,8 @@ bool hasPassword(Level level) {
 }
 
 String otaPasswordMd5() { return snapshot().otaMd5; }
+
+bool storageOk() { return !gStorageFailed; }
 
 uint32_t generation() { return gGeneration.load(); }
 

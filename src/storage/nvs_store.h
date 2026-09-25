@@ -183,15 +183,23 @@ void setLedColorConfig(const LedColorConfig &cfg);
 // invalidate every stored hash. otaMd5 is MD5(<admin password>), the form
 // ArduinoOTA's setPasswordHash() wants; it's derived from the same admin
 // password, so it's set and cleared together with adminHa1.
+//
+// Stored as one blob (key "hashes"), so the three always change together.
 struct AuthHashes {
   String adminHa1;
   String userHa1;
   String otaMd5;
 };
 
-AuthHashes getAuthHashes();
-// Returns false if NVS could not be written — the old hashes stay in effect.
+// Fills `out` and returns true on success, including first boot (nothing
+// stored: all empty). Returns false — with `out` empty — if NVS can't be
+// opened or the stored record is corrupt; callers must then fail closed,
+// not treat it as "no passwords".
+bool getAuthHashes(AuthHashes &out);
+// Returns false if NVS could not be written (or a value isn't a 32-hex
+// hash) — the previously stored hashes are then untouched.
 bool setAuthHashes(const AuthHashes &hashes);
-void clearAuth();
+// Stores "no passwords". Same failure semantics as setAuthHashes().
+bool clearAuth();
 
 } // namespace NvsStore

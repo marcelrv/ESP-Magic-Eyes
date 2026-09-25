@@ -18,6 +18,7 @@ void fillStatus(JsonDocument &doc) {
   doc["adminPassword"] = admin;
   doc["adminProtected"] = admin || control;
   doc["otaRestartRequired"] = OtaManager::restartRequiredForPassword();
+  doc["storageError"] = !Auth::storageOk();
 }
 
 void handleStatus(AsyncWebServerRequest *request) {

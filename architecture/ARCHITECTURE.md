@@ -96,7 +96,7 @@ Layered design:
 - Lids: three measured points — normalized 0.0 = `closedUs` (upper and lower lid just touching), 0.5 = `halfUs`, 1.0 = `openUs` — mapped piecewise linearly, because the lid linkages are non-linear and differ per eye. The points encode direction, so `inverted` does not apply to lids. `halfUs` must lie strictly between closed and open.
 - Every servo is `attach()`ed with ESP32Servo's full 500–2500 µs range, so the calibration page can probe past the saved limits via `ServoHal::setRawPulseUs()` (clamped only to 500–2500).
 - `led` namespace: one packed blob holding `brightness`/`colorL`/`colorR`/`effect`.
-- `auth` namespace: `adminHa1`, `userHa1` (HTTP Digest HA1, `MD5("<user>:ESP Magic Eyes:<password>")`) and `otaMd5` (`MD5(<admin password>)` for ArduinoOTA). A missing key means that level has no password. Only hashes are stored. The realm and the usernames `admin`/`user` are baked into the hashes, so changing them would invalidate every stored password.
+- `auth` namespace: one blob (`hashes`) holding `adminHa1`, `userHa1` (HTTP Digest HA1, `MD5("<user>:ESP Magic Eyes:<password>")`) and `otaMd5` (`MD5(<admin password>)` for ArduinoOTA), each 32 hex characters or empty (= that level has no password). A single blob, so all three change together in one atomic NVS write. No blob means no passwords. If NVS can't be read, or the blob has the wrong size or content, the device fails closed (see §4a). Only hashes are stored. The realm and the usernames `admin`/`user` are baked into the hashes, so changing them would invalidate every stored password.
 
 **LittleFS** — frontend + data files, mounted from the custom partition (see §8), served at URL root from the `/www/` directory within the filesystem image:
 - `/www/...` — the web frontend (`index.html`, `css/`, `js/`, `control/`, `setup/`)
@@ -168,7 +168,7 @@ Base path `/api`. Every route needs the **Control** or **Admin** password once t
 | Control | `user` (or `admin`) | static pages outside `/setup`, `/api/eyes/*`, `/api/gestures*`, `/api/playmodes*`, `/api/system/info`, `/api/system/status`, `/api/radar/status`, `/api/radar/latest` |
 | Admin | `admin` (or `user` while no admin password is set) | `/setup/*`, `/api/wifi/*`, `/api/servos/*`, `/api/radar/config`, `/api/led/*`, `/api/ota/*`, `/api/system/reboot`, `/api/system/config`, `/api/auth/password`, ArduinoOTA |
 
-The level comes from the URL alone (`Auth::requiredLevel()`); a URL containing `..`, `//` or `\` is treated as Admin, since LittleFS resolves `..`. HTTP **Digest** is used so the browser's own login prompt works for pages, `fetch` and XHR, and the password itself never crosses the network.
+The level comes from the URL alone (`Auth::requiredLevel()`); a URL containing a dot segment (`/.`, which covers `/./` and `/../`), `..`, `//` or `\` is treated as Admin, since LittleFS resolves `.` and `..` (`/./setup/wifi.html` would otherwise be served as a control-level page). HTTP **Digest** is used so the browser's own login prompt works for pages, `fetch` and XHR, and the password itself never crosses the network.
 
 **Two enforcement points.** ESPAsyncWebServer runs middleware only when the whole request has arrived, after every `onBody`/`onUpload` callback. Every POST handler here acts inside `onBody`, and web OTA writes flash inside `onUpload`, so a middleware-only check would act first and answer 401 afterwards. Therefore:
 - `Auth::middleware()` is registered on the server and sends the 401 challenge (or 429). This covers GETs, static files and POSTs without a body.
@@ -180,7 +180,9 @@ New POST routes get this for free as long as they use `collectJsonBody()`. A rou
 
 **ArduinoOTA** gets `setPasswordHash(otaMd5)` when it starts. It keeps the first password it is given until reboot, so after the admin password is changed or cleared, `OtaManager` leaves network OTA stopped until the next restart (it fails closed). `/api/auth/status` reports `otaRestartRequired`, and the Security page offers a restart.
 
-**Recovery** needs physical access: the BOOT-button 5 s hold (which also clears WiFi) or serial `auth reset`.
+**Recovery** needs physical access: the BOOT-button 5 s hold (which also clears WiFi) or serial `auth reset`. Both report failure if NVS can't be written. The BOOT path then does not reset WiFi or reboot, so a failed reset never looks like a successful one.
+
+**Fail closed on storage errors.** If the stored hashes can't be loaded at boot, `Auth` refuses every protected request, ArduinoOTA isn't started, and `/api/auth/status` reports `storageError: true`. A successful `auth reset` or BOOT-button reset recovers.
 
 **Known limitations:**
 - Plain HTTP: `POST /api/auth/password` carries the new password in clear text.

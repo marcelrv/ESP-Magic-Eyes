@@ -33,9 +33,14 @@ void handle() {
     if (!gTriggered && (millis() - gPressStartMs) >= kLongPressMs) {
       gTriggered = true;
       Serial.println("[Buttons] Factory-reset button held 5s — clearing passwords, forgetting WiFi, rebooting.");
-      // Physical access is the recovery path for forgotten passwords.
-      Auth::clearAll();
-      WifiManager::forgetNetwork(); // reboots; does not return in practice
+      // Physical access is the recovery path for forgotten passwords. If
+      // that fails (NVS write error), stop: rebooting into setup mode would
+      // look like a successful reset while the passwords stay active.
+      if (Auth::clearAll()) {
+        WifiManager::forgetNetwork(); // reboots; does not return in practice
+      } else {
+        Serial.println("[Buttons] Password reset failed — not resetting WiFi or rebooting.");
+      }
     }
   } else if (!down && gPressed) {
     // Released before threshold, or after triggering (reboot already

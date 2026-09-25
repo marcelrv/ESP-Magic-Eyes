@@ -82,7 +82,9 @@ void handle() {
   // Running with a password other than the admin one (just set, changed or
   // cleared): stop, and restart below with the new one if ArduinoOTA allows.
   bool passwordStale = gStarted && gAppliedMd5 != gWantedMd5;
-  bool canRun = gEnabledCached && connected && !gPasswordLocked;
+  // Auth::storageOk(): with unreadable stored passwords the admin hash is
+  // unknown, so starting would mean running ArduinoOTA without a password.
+  bool canRun = gEnabledCached && connected && !gPasswordLocked && Auth::storageOk();
 
   if (canRun && !gStarted) {
     startOta();
