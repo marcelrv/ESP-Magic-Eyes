@@ -2,6 +2,9 @@
 
 #include <Preferences.h>
 
+#include <cctype>
+#include <cstring>
+
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
@@ -11,6 +14,7 @@ constexpr const char *kWifiNamespace = "wifi";
 constexpr const char *kSystemNamespace = "system";
 constexpr const char *kServoCalNamespace = "servocal";
 constexpr const char *kLedNamespace = "led";
+constexpr const char *kAuthNamespace = "auth";
 
 constexpr const char *kKeySsid = "ssid";
 constexpr const char *kKeyPassword = "password";
@@ -24,6 +28,7 @@ constexpr const char *kKeyRadarBaud = "radarBaud";
 constexpr const char *kKeyRadarType = "radarType";
 constexpr const char *kKeyServoCalTable = "calTable";
 constexpr const char *kKeyLedConfig = "cfg";
+constexpr const char *kKeyAuthRecord = "hashes";
 
 constexpr const char *kDefaultHostname = "esp-magic-eyes";
 constexpr const char *kDefaultDeviceName = "Magic Eyes";
@@ -35,6 +40,7 @@ Preferences wifiPrefs;
 Preferences systemPrefs;
 Preferences servoCalPrefs;
 Preferences ledPrefs;
+Preferences authPrefs;
 
 // NvsStore is called from several tasks — loop() (WifiManager, serial
 // console), the AsyncTCP task (every API route) and setup(). The shared
@@ -153,6 +159,44 @@ bool saveServoCalTable(const ServoCalibration (&table)[kServoCount]) {
   size_t written = servoCalPrefs.putBytes(kKeyServoCalTable, table, kTableBytes);
   servoCalPrefs.end();
   return written == kTableBytes;
+}
+
+
+// The auth namespace's single blob: three MD5 hex strings (32 chars + NUL),
+// empty = that password isn't set. Stored as one entry so updates are
+// atomic (see setAuthHashes()).
+constexpr size_t kHashChars = 32;
+struct AuthRecord {
+  char adminHa1[kHashChars + 1] = {};
+  char userHa1[kHashChars + 1] = {};
+  char otaMd5[kHashChars + 1] = {};
+};
+
+bool isHashOrEmpty(const char *s, size_t len) {
+  if (len == 0) return true;
+  if (len != kHashChars) return false;
+  for (size_t i = 0; i < len; ++i) {
+    if (!isxdigit(static_cast<unsigned char>(s[i]))) return false;
+  }
+  return true;
+}
+
+// A field that isn't empty or 32 hex digits means a corrupt record.
+bool readHashField(const char (&field)[kHashChars + 1], String &out) {
+  size_t len = strnlen(field, sizeof(field));
+  if (len == sizeof(field) || !isHashOrEmpty(field, len)) {
+    return false;
+  }
+  out = String(field);
+  return true;
+}
+
+bool writeHashField(const String &value, char (&field)[kHashChars + 1]) {
+  if (!isHashOrEmpty(value.c_str(), value.length())) {
+    return false;
+  }
+  memcpy(field, value.c_str(), value.length() + 1);
+  return true;
 }
 
 } // namespace
@@ -359,5 +403,49 @@ void setLedColorConfig(const LedColorConfig &cfg) {
   ledPrefs.putBytes(kKeyLedConfig, &cfg, sizeof(LedColorConfig));
   ledPrefs.end();
 }
+
+bool getAuthHashes(AuthHashes &out) {
+  NvsLock lock;
+  out = AuthHashes{};
+  // Read-write open: it creates the namespace on first boot, so a failure
+  // here is a real NVS error rather than "never written". A read-only open
+  // can't tell the two apart, and treating an error as "no passwords"
+  // would silently unprotect the device.
+  if (!authPrefs.begin(kAuthNamespace, false)) {
+    return false;
+  }
+  size_t storedBytes = authPrefs.getBytesLength(kKeyAuthRecord);
+  bool ok = true;
+  if (storedBytes != 0) { // 0 = never set: no passwords
+    AuthRecord record;
+    ok = storedBytes == sizeof(record) && authPrefs.getBytes(kKeyAuthRecord, &record, sizeof(record)) == sizeof(record) &&
+         readHashField(record.adminHa1, out.adminHa1) && readHashField(record.userHa1, out.userHa1) &&
+         readHashField(record.otaMd5, out.otaMd5);
+  }
+  authPrefs.end();
+  if (!ok) {
+    out = AuthHashes{};
+  }
+  return ok;
+}
+
+bool setAuthHashes(const AuthHashes &hashes) {
+  NvsLock lock;
+  AuthRecord record;
+  if (!writeHashField(hashes.adminHa1, record.adminHa1) || !writeHashField(hashes.userHa1, record.userHa1) ||
+      !writeHashField(hashes.otaMd5, record.otaMd5)) {
+    return false;
+  }
+  if (!authPrefs.begin(kAuthNamespace, false)) {
+    return false;
+  }
+  // One blob, one NVS entry: it's either fully written or the old record
+  // stays — never a new admin hash next to a stale OTA hash.
+  size_t written = authPrefs.putBytes(kKeyAuthRecord, &record, sizeof(record));
+  authPrefs.end();
+  return written == sizeof(record);
+}
+
+bool clearAuth() { return setAuthHashes(AuthHashes{}); }
 
 } // namespace NvsStore

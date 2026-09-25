@@ -9,6 +9,15 @@
 // Plain global `Api` object, no module system, no build step.
 
 const Api = (() => {
+  // Password protection uses HTTP Digest: the browser shows its own login
+  // prompt on a 401 and then signs every request itself, so nothing here
+  // handles credentials. These only make the two auth failures readable.
+  function statusMessage(status, data) {
+    if (status === 401) return "Not logged in (or wrong password) — reload the page to log in";
+    if (status === 429) return "Too many wrong passwords — wait 30 seconds and reload";
+    return (data && (data.error || data.message)) || ("HTTP " + status);
+  }
+
   async function request(method, path, body) {
     const opts = { method };
     if (body !== undefined) {
@@ -23,8 +32,7 @@ const Api = (() => {
       // empty or non-JSON body — leave data null
     }
     if (!res.ok) {
-      const message = (data && (data.error || data.message)) || ("HTTP " + res.status);
-      const err = new Error(message);
+      const err = new Error(statusMessage(res.status, data));
       err.status = res.status;
       err.data = data;
       throw err;
@@ -119,8 +127,7 @@ const Api = (() => {
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve(data);
         } else {
-          const message = (data && (data.error || data.message)) || ("HTTP " + xhr.status);
-          const err = new Error(message);
+          const err = new Error(statusMessage(xhr.status, data));
           err.status = xhr.status;
           err.data = data;
           reject(err);
@@ -144,6 +151,10 @@ const Api = (() => {
     setSystemConfig: (cfg) => post("/api/system/config", cfg),
     reboot: () => post("/api/system/reboot"),
 
+    // --- passwords ------------------------------------------------------
+    getAuthStatus: () => get("/api/auth/status"),
+    setPassword: (level, password) => post("/api/auth/password", { level, password }),
+
     // --- wifi -----------------------------------------------------------
     wifiScan: () => get("/api/wifi/scan"),
     wifiConnect: (ssid, password) => post("/api/wifi/connect", { ssid, password }),
@@ -160,6 +171,7 @@ const Api = (() => {
     setGaze: (fields) => post("/api/eyes/gaze", fields),
     setEyelids: (fields) => post("/api/eyes/eyelids", fields),
     getPose: () => get("/api/eyes/pose"),
+    setNaturalMode: (enabled) => post("/api/eyes/natural", { enabled }),
 
     // --- gestures ---------------------------------------------------------
     getGestures: () => get("/api/gestures"),

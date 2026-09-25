@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Security &mdash; Magic Eyes</title>
+<link rel="stylesheet" href="../css/app.css">
+</head>
+<body class="theme-setup">
+<header class="app-header">
+  <div class="app-header-row">
+    <div class="app-header-title">
+      <span class="eye-mark">&#128065;</span>
+      <h1>Security</h1>
+      <span class="mode-pill">Maintenance</span>
+    </div>
+    <a class="home-link" href="../index.html">&larr; Home</a>
+  </div>
+  <div class="setup-banner">&#9888; Changing a password makes your browser ask you to log in again.</div>
+</header>
+<nav class="subnav">
+  <a href="wifi.html">WiFi</a>
+  <a href="calibration.html">Calibration</a>
+  <a href="radar.html">Radar</a>
+  <a href="ota.html">Firmware</a>
+  <a href="led.html">LED</a>
+  <a class="active" href="security.html">Security</a>
+</nav>
+
+<main class="container">
+  <div id="msg" class="msg hidden"></div>
+
+  <div class="card">
+    <h3>Status</h3>
+    <div class="grid cols-2">
+      <div class="stat"><span class="stat-label">Control password</span><span class="stat-value" id="st-control">&mdash;</span></div>
+      <div class="stat"><span class="stat-label">Admin password</span><span class="stat-value" id="st-admin">&mdash;</span></div>
+    </div>
+    <p class="small muted" id="st-note" style="margin-top:0.5rem;"></p>
+    <div id="ota-restart" class="hidden">
+      <div class="msg msg-warn">Network (PlatformIO) updates are paused until the
+        device restarts, so the new admin password can take effect.</div>
+      <button class="btn btn-block" id="reboot-btn">Restart now</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Control password</h3>
+    <p class="small muted">Needed to open the web pages and move the eyes
+      (manual control, gestures, play modes). Log in with user name
+      <span class="mono">user</span>. The admin password also works here.</p>
+    <div class="field">
+      <label for="control-pw">New password (4&ndash;64 characters)</label>
+      <input type="password" id="control-pw" autocomplete="new-password" maxlength="64">
+    </div>
+    <div class="field">
+      <label for="control-pw2">Repeat password</label>
+      <input type="password" id="control-pw2" autocomplete="new-password" maxlength="64">
+    </div>
+    <div class="grid cols-2">
+      <button class="btn btn-primary btn-block" id="control-save">Set password</button>
+      <button class="btn btn-block" id="control-clear">Remove password</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Admin password</h3>
+    <p class="small muted">Needed for these setup pages and for firmware updates.
+      Log in with user name <span class="mono">admin</span>. While no admin password
+      is set, the control password protects these pages too.</p>
+    <div class="field">
+      <label for="admin-pw">New password (4&ndash;64 characters)</label>
+      <input type="password" id="admin-pw" autocomplete="new-password" maxlength="64">
+    </div>
+    <div class="field">
+      <label for="admin-pw2">Repeat password</label>
+      <input type="password" id="admin-pw2" autocomplete="new-password" maxlength="64">
+    </div>
+    <div class="grid cols-2">
+      <button class="btn btn-primary btn-block" id="admin-save">Set password</button>
+      <button class="btn btn-block" id="admin-clear">Remove password</button>
+    </div>
+    <p class="small muted" style="margin-top:0.5rem;">Updating from PlatformIO over the
+      network then needs <span class="mono">upload_flags = --auth=&lt;admin password&gt;</span>
+      in <span class="mono">platformio.ini</span>.</p>
+  </div>
+
+  <div class="card">
+    <h3>Forgot a password?</h3>
+    <p class="small muted">With the device in hand, either hold the BOOT button for
+      5 seconds (this also forgets the WiFi network and starts the setup access point),
+      or type <span class="mono">auth reset</span> in the USB serial console.
+      Both remove both passwords.</p>
+  </div>
+</main>
+
+<footer class="app-footer">ESP Magic Eyes &mdash; security</footer>
+
+<script src="../js/api.js"></script>
+<script>
+(function () {
+  var msgEl = document.getElementById('msg');
+  function showMsg(text, kind) {
+    msgEl.textContent = text;
+    msgEl.className = 'msg msg-' + (kind || 'info');
+    msgEl.classList.remove('hidden');
+  }
+
+  var current = null; // last /api/auth/status answer
+
+  function render(s) {
+    current = s;
+    document.getElementById('st-control').textContent = s.controlPassword ? 'set' : 'not set';
+    document.getElementById('st-admin').textContent = s.adminPassword ? 'set' : 'not set';
+    var note;
+    if (!s.adminProtected) {
+      note = 'No password is set: anyone on your network can use and reconfigure this device.';
+    } else if (!s.adminPassword) {
+      note = 'Setup pages are protected by the control password.';
+    } else if (!s.controlPassword) {
+      note = 'Setup pages need the admin password; the controls are open to everyone on your network.';
+    } else {
+      note = 'Controls and setup pages are both protected.';
+    }
+    document.getElementById('st-note').textContent = note;
+    document.getElementById('ota-restart').classList.toggle('hidden', !s.otaRestartRequired);
+    document.getElementById('control-clear').disabled = !s.controlPassword;
+    document.getElementById('admin-clear').disabled = !s.adminPassword;
+  }
+
+  function load() {
+    Api.getAuthStatus().then(render).catch(function (err) {
+      showMsg('Could not load password status: ' + err.message, 'error');
+    });
+  }
+
+  function wire(level, userName) {
+    var pw = document.getElementById(level + '-pw');
+    var pw2 = document.getElementById(level + '-pw2');
+    var label = level === 'admin' ? 'Admin' : 'Control';
+
+    function submit(password, done) {
+      Api.setPassword(level, password).then(function (s) {
+        pw.value = '';
+        pw2.value = '';
+        render(s);
+        showMsg(done, 'ok');
+      }).catch(function (err) {
+        showMsg(label + ' password not changed: ' + err.message, 'error');
+      });
+    }
+
+    document.getElementById(level + '-save').addEventListener('click', function () {
+      if (pw.value.length < 4 || pw.value.length > 64) {
+        showMsg('The password must be 4 to 64 characters.', 'error');
+        return;
+      }
+      if (pw.value !== pw2.value) {
+        showMsg('The two passwords do not match.', 'error');
+        return;
+      }
+      submit(pw.value, label + ' password set. Your browser will ask you to log in; ' +
+        'use user name "' + userName + '".');
+    });
+
+    document.getElementById(level + '-clear').addEventListener('click', function () {
+      var question = 'Remove the ' + level + ' password?';
+      // Removing the admin password also invalidates the browser's saved
+      // "admin" login, while the control password then guards these pages
+      // (admin routes fall back to it). Without this warning the next
+      // change on this page brings up a login prompt that looks like an
+      // error, and cancelling it silently leaves the control password set.
+      if (level === 'admin' && current && current.controlPassword) {
+        question += '\n\nYour browser\'s "admin" login will stop working. The control password ' +
+          'then protects these pages: when your browser asks, log in with user name "user".';
+      }
+      if (!confirm(question)) return;
+      var controlStillSet = level === 'admin' && current && current.controlPassword;
+      submit('', label + ' password removed.' +
+        (controlStillSet ? ' When your browser asks you to log in, use user name "user".' : ''));
+    });
+  }
+
+  wire('control', 'user');
+  wire('admin', 'admin');
+
+  document.getElementById('reboot-btn').addEventListener('click', function () {
+    var btn = this;
+    btn.disabled = true;
+    Api.reboot().then(function () {
+      showMsg('Restarting. Reload this page in a few seconds.', 'ok');
+    }).catch(function (err) {
+      showMsg('Restart failed: ' + err.message, 'error');
+      btn.disabled = false;
+    });
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

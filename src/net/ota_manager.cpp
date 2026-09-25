@@ -2,6 +2,9 @@
 
 #include <ArduinoOTA.h>
 
+#include <atomic>
+
+#include "net/auth.h"
 #include "net/wifi_manager.h"
 #include "storage/nvs_store.h"
 
@@ -10,9 +13,39 @@ namespace {
 bool gEnabledCached = true;
 bool gStarted = false;
 
+// Password bookkeeping, loop() only except gPasswordLocked (read by the
+// /api/auth/status handler). gAppliedMd5 is the hash handed to ArduinoOTA,
+// which it keeps until reboot; gWantedMd5 is the current admin password's.
+bool gAuthLoaded = false;
+uint32_t gAuthGeneration = 0;
+String gAppliedMd5;
+String gWantedMd5;
+std::atomic<bool> gPasswordLocked{false};
+
+void refreshPassword() {
+  uint32_t generation = Auth::generation();
+  if (gAuthLoaded && generation == gAuthGeneration) {
+    return;
+  }
+  gAuthLoaded = true;
+  gAuthGeneration = generation;
+  gWantedMd5 = Auth::otaPasswordMd5();
+  // A stored password can only be replaced by a restart; an empty one can
+  // still be set now (setPasswordHash() works while ArduinoOTA has none).
+  bool locked = gAppliedMd5.length() > 0 && gAppliedMd5 != gWantedMd5;
+  if (locked && !gPasswordLocked) {
+    Serial.println("[OTA] Admin password changed — network OTA paused until restart.");
+  }
+  gPasswordLocked = locked;
+}
+
 void startOta() {
   String hostname = NvsStore::getHostname();
   ArduinoOTA.setHostname(hostname.c_str());
+  if (gWantedMd5.length() > 0) {
+    ArduinoOTA.setPasswordHash(gWantedMd5.c_str());
+    gAppliedMd5 = gWantedMd5;
+  }
 
   ArduinoOTA.onStart([]() {
     const char *type = (ArduinoOTA.getCommand() == U_FLASH) ? "firmware" : "filesystem";
@@ -45,10 +78,17 @@ void begin() { gEnabledCached = NvsStore::getOtaNetworkEnabled(); }
 
 void handle() {
   bool connected = WifiManager::getMode() == WifiMode::STA_CONNECTED;
+  refreshPassword();
+  // Running with a password other than the admin one (just set, changed or
+  // cleared): stop, and restart below with the new one if ArduinoOTA allows.
+  bool passwordStale = gStarted && gAppliedMd5 != gWantedMd5;
+  // Auth::storageOk(): with unreadable stored passwords the admin hash is
+  // unknown, so starting would mean running ArduinoOTA without a password.
+  bool canRun = gEnabledCached && connected && !gPasswordLocked && Auth::storageOk();
 
-  if (gEnabledCached && connected && !gStarted) {
+  if (canRun && !gStarted) {
     startOta();
-  } else if ((!gEnabledCached || !connected) && gStarted) {
+  } else if ((!canRun || passwordStale) && gStarted) {
     stopOta();
   }
 
@@ -63,5 +103,7 @@ void setEnabled(bool enabled) {
 }
 
 bool isEnabled() { return gEnabledCached; }
+
+bool restartRequiredForPassword() { return gPasswordLocked; }
 
 } // namespace OtaManager

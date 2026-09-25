@@ -5,6 +5,8 @@
 #include <ESPAsyncWebServer.h>
 #include <Update.h>
 
+#include "net/auth.h"
+
 namespace {
 
 enum class OtaResult {
@@ -48,8 +50,15 @@ const char *resultToString(OtaResult result) {
 // "type" label differ between the two routes.
 void handleOtaUploadChunk(AsyncWebServerRequest *request, const String &filename, size_t index, uint8_t *data, size_t len,
                            bool final, int updateCommand, const char *typeName) {
-  (void)request;
   (void)filename;
+
+  // Checked on every chunk, before anything touches Update or gStatus: the
+  // auth middleware only runs once the whole upload has been received (see
+  // net/auth.h), by which point the image would already be flashed. A
+  // rejected upload is just drained; the middleware then answers 401.
+  if (!Auth::allowed(request, Auth::Level::Admin)) {
+    return;
+  }
 
   if (index == 0) {
     gStatus.result = OtaResult::IN_PROGRESS;

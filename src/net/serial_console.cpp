@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 
+#include "net/auth.h"
 #include "net/wifi_manager.h"
 #include "version.h"
 
@@ -45,7 +46,14 @@ void printHelp() {
   Serial.println("  wifi set <ssid> [password]    save credentials and connect now");
   Serial.println("                                (use \"double quotes\" for spaces)");
   Serial.println("  wifi forget                   clear credentials, reboot to setup AP");
+  Serial.println("  auth [status]                 which passwords are set");
+  Serial.println("  auth reset                    clear both web/OTA passwords");
   Serial.println("  reboot                        restart the device");
+}
+
+void printAuthStatus() {
+  Serial.printf("Control password: %s\n", Auth::hasPassword(Auth::Level::Control) ? "set" : "not set");
+  Serial.printf("Admin password  : %s\n", Auth::hasPassword(Auth::Level::Admin) ? "set" : "not set");
 }
 
 void printWifiStatus() {
@@ -96,6 +104,21 @@ void runCommand(const String &line) {
       WifiManager::forgetNetwork(); // reboots
     } else {
       Serial.println("Unknown wifi command. Try: wifi status | wifi set <ssid> [password] | wifi forget");
+    }
+  } else if (cmd == "auth") {
+    // Password recovery needs a USB cable, i.e. physical access.
+    String sub = argc > 1 ? args[1] : String("status");
+    sub.toLowerCase();
+    if (sub == "status") {
+      printAuthStatus();
+    } else if (sub == "reset") {
+      if (Auth::clearAll()) {
+        Serial.println("Both passwords cleared. Network OTA picks this up after a reboot.");
+      } else {
+        Serial.println("FAILED to clear the passwords (NVS write error); they are unchanged.");
+      }
+    } else {
+      Serial.println("Unknown auth command. Try: auth status | auth reset");
     }
   } else if (cmd == "reboot" || cmd == "restart") {
     Serial.println("Rebooting...");

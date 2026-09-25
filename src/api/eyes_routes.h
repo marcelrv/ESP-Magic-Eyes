@@ -8,6 +8,8 @@
 //                              durationMs?}, normalized 0..1, partial
 //                              updates allowed, source=Manual, bumps
 //                              commandGeneration
+//   POST /api/eyes/natural  — {enabled}, live natural-mode toggle
+//                              (NaturalModeCoupler::setEnabled())
 //   GET  /api/eyes/pose     — thin wrapper around
 //                              MotionTask::getCurrentPose()
 

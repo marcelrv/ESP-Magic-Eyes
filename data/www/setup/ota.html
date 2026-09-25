@@ -24,6 +24,7 @@
   <a href="radar.html">Radar</a>
   <a class="active" href="ota.html">Firmware</a>
   <a href="led.html">LED</a>
+  <a href="security.html">Security</a>
 </nav>
 
 <main class="container">
@@ -39,6 +40,11 @@
   </div>
 
   <div id="msg" class="msg hidden"></div>
+
+  <p class="small muted">Uploading from PlatformIO over the network (<span class="mono">pio run -t upload
+    --upload-port &lt;ip&gt;</span>) needs the admin password, if one is set:
+    add <span class="mono">upload_flags = --auth=&lt;admin password&gt;</span> to
+    <span class="mono">platformio.ini</span>. See <a href="security.html">Security</a>.</p>
 
   <div class="card">
     <h3>Firmware update</h3>

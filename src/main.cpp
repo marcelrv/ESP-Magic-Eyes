@@ -21,6 +21,7 @@
 #include "hal/led_controller.h"
 #include "hal/servo_hal.h"
 #include "motion/motion_task.h"
+#include "net/auth.h"
 #include "net/ota_manager.h"
 #include "net/serial_console.h"
 #include "net/web_server.h"
@@ -60,6 +61,8 @@ void setup() {
   }
 
   NvsStore::begin();
+
+  Auth::begin(); // before WebServer/OtaManager, which both consult it
 
   WifiManager::begin();
 
