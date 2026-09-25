@@ -8,7 +8,8 @@
   <!-- Published by .github/workflows/webflash.yml next to the generated
        latest/ and stable/ channel dirs (manifest.json + .bin). Colours follow data/www/css/app.css
        so the installer looks like the device's own web UI. -->
-  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+  <!-- Exact version on purpose: this script gets serial access to the board. -->
+  <script type="module" src="https://cdn.jsdelivr.net/npm/esp-web-tools@10.4.0/dist/web/install-button.js"></script>
   <style>
     :root {
       --bg: #f4f5f7; --card: #fff; --text: #1b1f24; --muted: #5b6472;
@@ -28,6 +29,7 @@
       }
     }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     body { margin: 0; background: var(--bg); color: var(--text);
            font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
     a { color: var(--accent); }
@@ -170,6 +172,7 @@
           Web flashing only works on a secure (https) page.
         </span>
       </esp-web-install-button>
+      <p class="notice" id="no-firmware" hidden>No firmware is published here yet. Please check back later.</p>
       <p class="hint">Works in Chrome and Edge on Windows, macOS, Linux and ChromeOS.</p>
     </div>
   </section>
@@ -255,7 +258,13 @@
       })
   )).then(found => {
     const avail = found.filter(Boolean);
-    select(avail.includes(saved) ? saved : (avail[0] || "stable"));
+    if (avail.length) {
+      select(avail.includes(saved) ? saved : avail[0]);
+    } else {
+      // Nothing to flash (or the page is opened locally): no dead button.
+      installer.hidden = true;
+      document.getElementById("no-firmware").hidden = false;
+    }
   });
 
   // The eyes follow the pointer and blink now and then, like the real thing.
