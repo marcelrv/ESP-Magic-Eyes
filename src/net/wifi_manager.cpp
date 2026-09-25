@@ -11,6 +11,7 @@
 
 #include <esp_wifi.h>
 
+#include "motion/eye_pose.h" // deadlineReached()
 #include "storage/nvs_store.h"
 
 namespace {
@@ -34,6 +35,11 @@ uint32_t gStaConnectStartMs = 0;
 uint32_t gStaFailedAtMs = 0;
 bool gApActive = false;
 bool gMdnsStarted = false;
+// A failed mDNS start is retried this often while the link stays up;
+// otherwise the .local name stayed gone until the next reconnect.
+constexpr uint32_t kMdnsRetryMs = 30000;
+bool gMdnsRetryPending = false;
+uint32_t gMdnsRetryAtMs = 0;
 
 // How long STA_FAILED is left in place (observable via GET
 // /api/system/status's wifiMode) before falling back to AP mode.
@@ -269,9 +275,15 @@ void startMdnsOnce() {
   }
   String hostname = NvsStore::getHostname();
   if (!MDNS.begin(hostname)) {
-    Serial.println("[WiFi] mDNS failed to start.");
+    // begin() can fail after mdns_init() already succeeded (hostname set
+    // failed); free it, or every retry's mdns_init() fails as well.
+    MDNS.end();
+    gMdnsRetryPending = true;
+    gMdnsRetryAtMs = millis() + kMdnsRetryMs;
+    Serial.println("[WiFi] mDNS failed to start, retrying in 30 s.");
     return;
   }
+  gMdnsRetryPending = false;
   MDNS.setInstanceName(NvsStore::getDeviceName());
   MDNS.addService("http", "tcp", 80);
   gMdnsStarted = true;
@@ -357,6 +369,9 @@ void handle() {
   } else if (gMode == WifiMode::STA_CONNECTED) {
     if (WiFi.isConnected()) {
       gLinkDownTiming = false;
+      if (gMdnsRetryPending && deadlineReached(millis(), gMdnsRetryAtMs)) {
+        startMdnsOnce();
+      }
     } else if (!gLinkDownTiming) {
       gLinkDownTiming = true;
       gLinkDownSinceMs = millis();
