@@ -3,9 +3,13 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
+#include <atomic>
 #include <Update.h>
 
+#include "api/json_helpers.h"
 #include "net/auth.h"
+#include "net/update_manager.h"
+#include "version.h"
 
 namespace {
 
@@ -25,7 +29,8 @@ struct OtaStatusState {
 
 OtaStatusState gStatus;
 
-bool gRestartPending = false;
+// Atomic: set on the AsyncTCP task, read by loop() and the update worker.
+std::atomic<bool> gRestartPending{false};
 uint32_t gRestartAtMs = 0;
 // Gives AsyncTCP time to actually flush the HTTP response to the client
 // before the reboot tears the connection down.
@@ -61,6 +66,16 @@ void handleOtaUploadChunk(AsyncWebServerRequest *request, const String &filename
   }
 
   if (index == 0) {
+    // A WiFi update (net/update_manager) holds Update.h; the "abort stale
+    // update" step below would kill its download mid-write.
+    if (UpdateManager::installing()) {
+      gStatus.result = OtaResult::FAILURE;
+      gStatus.type = typeName;
+      gStatus.errorString = "A WiFi update is in progress";
+      gStatus.bytesWritten = 0;
+      return;
+    }
+    UpdateManager::clearInstallStatus();
     gStatus.result = OtaResult::IN_PROGRESS;
     gStatus.type = typeName;
     gStatus.errorString = "";
@@ -161,6 +176,24 @@ void sendOtaResultResponse(AsyncWebServerRequest *request) {
 
 void handleOtaStatus(AsyncWebServerRequest *request) {
   JsonDocument doc;
+  // A WiFi update (check-and-install) reports through the same shape, so the
+  // page's one status poll covers both it and the manual uploads.
+  UpdateManager::InstallStatus wifi = UpdateManager::getInstall();
+  if (wifi.result != UpdateManager::InstallStatus::Result::NONE) {
+    using R = UpdateManager::InstallStatus::Result;
+    doc["result"] = wifi.result == R::IN_PROGRESS ? "in_progress" : wifi.result == R::SUCCESS ? "success" : "failure";
+    doc["type"] = wifi.phase;
+    doc["source"] = "wifi";
+    doc["bytesWritten"] = wifi.bytesWritten;
+    doc["totalBytes"] = wifi.totalBytes;
+    if (wifi.result == R::FAILURE) {
+      doc["error"] = wifi.error;
+    }
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    serializeJson(doc, *response);
+    request->send(response);
+    return;
+  }
   doc["result"] = resultToString(gStatus.result);
   doc["type"] = gStatus.type;
   doc["bytesWritten"] = gStatus.bytesWritten;
@@ -173,15 +206,77 @@ void handleOtaStatus(AsyncWebServerRequest *request) {
   request->send(response);
 }
 
+void putChannel(JsonObject out, const UpdateManager::ChannelInfo &info) {
+  out["available"] = info.available;
+  out["version"] = info.version;
+  out["newer"] = info.newer;
+  if (!info.sha.isEmpty()) out["sha"] = info.sha;
+  if (!info.available && !info.error.isEmpty()) out["error"] = info.error;
+}
+
+// POST /api/ota/check — starts the background check. No body, so the auth
+// middleware (admin, /api/ota/ prefix) is the only gate, as for /reboot.
+void handleCheckStart(AsyncWebServerRequest *request) {
+  String error;
+  if (!UpdateManager::startCheck(error)) {
+    JsonHelpers::sendJsonError(request, 409, error.c_str());
+    return;
+  }
+  JsonDocument doc;
+  doc["success"] = true;
+  JsonHelpers::sendJson(request, doc);
+}
+
+// GET /api/ota/check — state of the last/ongoing check, plus what is installed.
+void handleCheckResult(AsyncWebServerRequest *request) {
+  using State = UpdateManager::CheckResult::State;
+  UpdateManager::CheckResult r = UpdateManager::getCheck();
+  JsonDocument doc;
+  doc["state"] = r.state == State::CHECKING ? "checking" : r.state == State::DONE ? "done" : r.state == State::ERROR ? "error" : "idle";
+  if (r.state == State::ERROR) doc["error"] = r.error;
+  JsonObject installed = doc["installed"].to<JsonObject>();
+  installed["version"] = FIRMWARE_VERSION;
+  installed["sha"] = FIRMWARE_GIT_SHA;
+  putChannel(doc["stable"].to<JsonObject>(), r.stable);
+  putChannel(doc["latest"].to<JsonObject>(), r.latest);
+  JsonHelpers::sendJson(request, doc);
+}
+
+// POST /api/ota/install {"channel": "stable" | "latest"}
+void handleInstallBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+  JsonDocument reqDoc;
+  if (!JsonHelpers::collectJsonBody(request, data, len, index, total, reqDoc)) {
+    return;
+  }
+  UpdateManager::Channel channel;
+  if (!UpdateManager::parseChannel(reqDoc["channel"] | "", channel)) {
+    JsonHelpers::sendJsonError(request, 400, "channel must be \"stable\" or \"latest\"");
+    return;
+  }
+  String error;
+  if (!UpdateManager::startInstall(channel, error)) {
+    JsonHelpers::sendJsonError(request, 409, error.c_str());
+    return;
+  }
+  JsonDocument doc;
+  doc["success"] = true;
+  JsonHelpers::sendJson(request, doc);
+}
+
 } // namespace
 
 namespace OtaRoutes {
 
 void registerRoutes(AsyncWebServer &server) {
+  server.on("/api/ota/check", HTTP_POST, handleCheckStart);
+  server.on("/api/ota/check", HTTP_GET, handleCheckResult);
+  server.on("/api/ota/install", HTTP_POST, JsonHelpers::requireBody, nullptr, handleInstallBody);
   server.on("/api/ota/firmware", HTTP_POST, sendOtaResultResponse, handleFirmwareUpload);
   server.on("/api/ota/filesystem", HTTP_POST, sendOtaResultResponse, handleFilesystemUpload);
   server.on("/api/ota/status", HTTP_GET, handleOtaStatus);
 }
+
+bool restartPending() { return gRestartPending; }
 
 void handle() {
   if (gRestartPending && millis() >= gRestartAtMs) {

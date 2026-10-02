@@ -41,6 +41,30 @@
 
   <div id="msg" class="msg hidden"></div>
 
+  <div class="card" id="wifi-update-card">
+    <h3>Update over WiFi</h3>
+    <p class="small muted">Checks the published releases and installs the firmware and the web interface together.
+      The device needs your home network with internet access. Your settings are kept.</p>
+    <button class="btn btn-primary btn-block" id="chk-btn">Check for updates</button>
+    <div id="chk-result" class="hidden" style="margin-top:0.75rem;">
+      <div class="grid cols-2">
+        <div>
+          <div class="stat"><span class="stat-label">Stable release</span><span class="stat-value" id="chk-stable">&mdash;</span>
+            <span class="badge badge-muted" id="chk-stable-badge"></span></div>
+          <button class="btn btn-primary btn-block" id="inst-stable-btn" style="margin-top:0.5rem;" disabled>Install stable</button>
+        </div>
+        <div>
+          <div class="stat"><span class="stat-label">Latest (development)</span><span class="stat-value" id="chk-latest">&mdash;</span>
+            <span class="badge badge-muted" id="chk-latest-badge"></span></div>
+          <button class="btn btn-block" id="inst-latest-btn" style="margin-top:0.5rem;" disabled>Install latest</button>
+          <p class="small muted" style="margin-top:0.35rem;">Newest work in progress. It can be untested.</p>
+        </div>
+      </div>
+    </div>
+    <div class="progress hidden" id="wu-bar" style="margin-top:0.5rem;"><div id="wu-progress"></div></div>
+    <p class="small mono" id="wu-status" style="margin-top:0.35rem;"></p>
+  </div>
+
   <p class="small muted">Uploading from PlatformIO over the network (<span class="mono">pio run -t upload
     --upload-port &lt;ip&gt;</span>) needs the admin password, if one is set:
     add <span class="mono">upload_flags = --auth=&lt;admin password&gt;</span> to
@@ -79,7 +103,8 @@
   }
 
   Api.getSystemInfo().then(function (info) {
-    document.getElementById('cur-version').textContent = info.firmwareVersion || '—';
+    document.getElementById('cur-version').textContent = (info.firmwareVersion || '—') +
+      (info.gitSha && info.gitSha !== 'unknown' ? '+' + info.gitSha : '');
     document.getElementById('cur-build').textContent = info.buildDate || '—';
     document.getElementById('cur-radar').textContent = info.radarVariant || '—';
     document.getElementById('cur-chip').textContent = info.chipId || '—';
@@ -144,6 +169,124 @@
         }
       });
     }, 1000, function () { /* device may be mid-reboot — expected to fail transiently */ });
+  }
+
+  // ---- update over WiFi --------------------------------------------------
+  var chkBtn = document.getElementById('chk-btn');
+  var instStable = document.getElementById('inst-stable-btn');
+  var instLatest = document.getElementById('inst-latest-btn');
+  var wuBar = document.getElementById('wu-bar');
+  var wuProgress = document.getElementById('wu-progress');
+  var wuStatus = document.getElementById('wu-status');
+  var installedBase = '';
+
+  function setBadge(id, text, cls) {
+    var el = document.getElementById(id);
+    el.textContent = text;
+    el.className = 'badge ' + cls;
+  }
+
+  function showChannel(prefix, info) {
+    var label = document.getElementById('chk-' + prefix);
+    if (!info.available) {
+      label.textContent = 'Unavailable';
+      setBadge('chk-' + prefix + '-badge', info.error || 'Could not be checked', 'badge-muted');
+    } else {
+      label.textContent = info.version;
+      var same = prefix === 'latest' || info.version.replace(/^v/, '') === installedBase;
+      setBadge('chk-' + prefix + '-badge', info.newer ? 'Update available' : same ? 'Up to date' : 'Older than installed',
+        info.newer ? 'badge-warn' : same ? 'badge-ok' : 'badge-muted');
+    }
+  }
+
+  function showCheck(r) {
+    document.getElementById('chk-result').classList.remove('hidden');
+    installedBase = r.installed.version;
+    showChannel('stable', r.stable);
+    showChannel('latest', r.latest);
+    instStable.disabled = !r.stable.available;
+    instLatest.disabled = !r.latest.available;
+  }
+
+  chkBtn.addEventListener('click', function () {
+    chkBtn.disabled = true;
+    wuStatus.textContent = 'Checking…';
+    Api.checkForUpdates().then(function () {
+      var stop = Api.pollEvery(function () {
+        return Api.getUpdateCheck().then(function (r) {
+          if (r.state === 'checking') return;
+          stop();
+          chkBtn.disabled = false;
+          if (r.state === 'error') {
+            wuStatus.textContent = '';
+            showMsg('Could not check for updates: ' + (r.error || 'unknown error'), 'error');
+          } else {
+            wuStatus.textContent = '';
+            showCheck(r);
+          }
+        });
+      }, 1000, function (err) {
+        stop();
+        chkBtn.disabled = false;
+        showMsg('Could not check for updates: ' + err.message, 'error');
+      });
+    }).catch(function (err) {
+      chkBtn.disabled = false;
+      wuStatus.textContent = '';
+      showMsg('Could not check for updates: ' + err.message, 'error');
+    });
+  });
+
+  function install(channel, warning) {
+    if (!window.confirm(warning)) return;
+    chkBtn.disabled = instStable.disabled = instLatest.disabled = true;
+    wuBar.classList.remove('hidden');
+    wuProgress.style.width = '0%';
+    wuStatus.textContent = 'Starting…';
+    Api.installUpdate(channel).then(function () {
+      pollWifiInstall();
+    }).catch(function (err) {
+      showMsg('Could not start the update: ' + err.message, 'error');
+      chkBtn.disabled = instStable.disabled = instLatest.disabled = false;
+    });
+  }
+
+  instStable.addEventListener('click', function () {
+    install('stable', 'Install the stable release? The device restarts when it is done. Do not unplug it meanwhile.');
+  });
+  instLatest.addEventListener('click', function () {
+    install('latest', 'Install the latest development build? It is the newest work in progress and can be untested. ' +
+      'The device restarts when it is done. Do not unplug it meanwhile.');
+  });
+
+  // Progress comes from the same status endpoint as manual uploads. The
+  // reboot at the end resets it to "none", which is the back-online signal.
+  function pollWifiInstall() {
+    var sawSuccess = false;
+    var stop = Api.pollEvery(function () {
+      return Api.getOtaStatus().then(function (s) {
+        if (s.result === 'in_progress') {
+          var pct = s.totalBytes ? Math.round(100 * s.bytesWritten / s.totalBytes) : 0;
+          wuProgress.style.width = pct + '%';
+          wuStatus.textContent = s.type === 'preparing' ? 'Preparing…'
+            : 'Downloading ' + s.type + '… ' + (s.totalBytes ? pct + '%' : Math.round(s.bytesWritten / 1024) + ' KB');
+        } else if (s.result === 'success') {
+          sawSuccess = true;
+          wuProgress.style.width = '100%';
+          wuStatus.textContent = 'Installed. Restarting…';
+        } else if (s.result === 'failure') {
+          stop();
+          wuStatus.textContent = '';
+          showMsg('Update failed: ' + (s.error || 'unknown error'), 'error');
+          chkBtn.disabled = false;
+          instStable.disabled = instLatest.disabled = false;
+        } else if (s.result === 'none' && sawSuccess) {
+          stop();
+          showMsg('Update installed. Reloading…', 'ok');
+          setTimeout(function () { window.location.reload(); }, 1500);
+        }
+      });
+    }, 1000, function () { /* device may be mid-reboot, expected to fail transiently */ });
   }
 
   wireUpload('fw-file', 'fw-upload-btn', 'fw-progress', 'fw-status', '/api/ota/firmware', 'firmware');

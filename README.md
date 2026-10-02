@@ -17,7 +17,7 @@ The eyes can move on their own (looking around, blinking, "sleeping"), react whe
 
 **The easy way — from your browser.** Open the [web installer](https://marcelrv.github.io/ESP-Magic-Eyes/) in Chrome or Edge on a computer, plug the ESP32 in with a USB cable, click **Connect** and follow the steps. Nothing to install. Pick **Stable** (the latest release, recommended) or **Latest** (the newest changes, less tested).
 
-**Updating later** works the same way. Choose **Install**, but don't tick "erase device", and your WiFi, calibration and passwords are kept. Or download `firmware.bin` and `littlefs.bin` from the installer page and upload both on the device's **Setup → Firmware update** page over WiFi.
+**Updating later** can be done from the device itself: open **Setup → Firmware update** and press **Check for updates**. It shows the newest stable release and the newest development build, and installs your choice in one go (the device needs internet access). Or use the installer again. In the installer, choose **Install**, but don't tick "erase device", and your WiFi, calibration and passwords are kept. Or download `firmware.bin` and `littlefs.bin` from the installer page and upload both on the device's **Setup → Firmware update** page over WiFi.
 
 **Building it yourself.** You'll need a computer with [Visual Studio Code](https://code.visualstudio.com/) and the [PlatformIO extension](https://platformio.org/platformio-ide) installed — both are free. Then:
 

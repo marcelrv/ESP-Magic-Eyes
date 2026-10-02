@@ -47,6 +47,7 @@ void handleSystemInfo(AsyncWebServerRequest *request) {
   JsonDocument doc;
   doc["firmwareVersion"] = FIRMWARE_VERSION;
   doc["buildDate"] = __DATE__ " " __TIME__;
+  doc["gitSha"] = FIRMWARE_GIT_SHA;
   doc["chipId"] = chipIdHex();
   doc["uptimeMs"] = millis();
   doc["resetReason"] = resetReasonName();
