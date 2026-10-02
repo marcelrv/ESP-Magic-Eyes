@@ -35,16 +35,27 @@ The very first time it powers on (and any time its WiFi is "forgotten"), the dev
 1. On your phone or laptop, connect to the WiFi network named **`MagicEyes-Setup-XXXX`** (the last 4 characters vary per device). Password: `eyes-setup`.
 2. A setup page should pop up automatically (like the "sign in to WiFi" screens hotels use). If it doesn't, open a browser and go to `http://192.168.4.1`.
 3. Choose your home WiFi network from the list (or type its name), enter the password, and confirm.
-4. The device restarts and joins your home network. From then on, it's reachable on that network — check your router's device list for its name/IP address, or use network-discovery tools if you're not sure.
+4. The device restarts and joins your home network. From then on you can reach it by name — see the next step.
 
 If the device can't reach your WiFi (for example after the network name or password changed), it falls back to the `MagicEyes-Setup-XXXX` network above and keeps retrying your saved network every minute. You can also set the WiFi details over the USB cable: open a serial monitor at 115200 baud (e.g. PlatformIO's **Monitor**) and type `wifi set <network-name> "<password>"` (quotes are needed if the name or password contains spaces). Type `help` for the other commands, such as `wifi status`.
 
 ### 3. Open the control page
 
-Once it's on your home WiFi, open a browser (on your phone, tablet, or computer) and go to the device's address. You'll land on the home page, with two sections:
+Once it's on your home WiFi, open a browser (on your phone, tablet, or computer) on the same network and go to:
+
+**http://esp-magic-eyes.local**
+
+If that name doesn't open (some phones, Android especially, don't support `.local` names), use the device's IP address instead. To find it:
+
+- look in your router's list of connected devices for **esp-magic-eyes**, or
+- connect the USB cable, open a serial monitor at 115200 baud and type `wifi status`.
+
+On many home networks plain **http://esp-magic-eyes** works too. You'll land on the home page, with two sections:
 
 - **Control** — for everyday use: move the eyes, trigger a wink or blink, switch between behavior modes (idle, curious, sleepy, greeting, "watch for people").
 - **Setup** — for calibration and maintenance: fine-tuning each servo's range of motion, checking the radar sensor is working, updating the firmware, and reconfiguring WiFi. These pages have an orange "maintenance" theme so they're never mistaken for the everyday controls.
+
+<p align="center"><img src="docs/images/home.png" width="300" alt="Home page: status, Control and Setup sections"></p>
 
 ## Everyday use
 
@@ -59,6 +70,16 @@ From the **Control** section:
   - **Watch for people** (tracking) — reacts when the radar senses someone nearby. With the radar sensor included in the kit, it gives an alert glance when someone approaches (it can't yet tell *which direction* they're in); the optional upgraded radar sensor adds the ability to actually follow a person's position.
   - **Manual** — turns off all automatic behavior, so you're always in full control (recommended if you're driving the eyes from another app, a voice assistant, or your own code).
 - **Status** — a live readout of what the eyes are currently doing and what the radar sensor sees, handy for checking everything's working.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/images/manual.png" width="250" alt="Manual control: gaze pad and eyelid sliders"><br><sub>Manual control</sub></td>
+    <td align="center"><img src="docs/images/playmodes.png" width="250" alt="Play modes list"><br><sub>Play modes</sub></td>
+    <td align="center"><img src="docs/images/status.png" width="250" alt="Live status page"><br><sub>Status</sub></td>
+  </tr>
+</table>
+
+<p align="center"><img src="docs/images/gestures.png" width="420" alt="Natural mode switch and gesture buttons: blink, winks, surprise, sleepy, squint, look around, double blink, roll eyes"><br><sub>Gestures and natural mode, further down the Manual control page</sub></p>
 
 ## Setup & maintenance
 
@@ -87,6 +108,8 @@ Your browser remembers the login until you close it. If you update the firmware 
 Every mechanism is assembled slightly differently, so the device needs to be shown a few reference positions. Everything else — gaze movements, blinks, winks, sleep, natural-mode eyelids — is measured from these points, so it's worth doing carefully.
 
 Open **Setup → Calibration**. While this page is open, all automatic eye movement is paused, so each servo stays exactly where you put it. Every position is set with a slider (drag it, or use the **−10 / −1 / +1 / +10** buttons for fine tuning) and the servo moves live as you adjust it. Work through the steps in order, pressing that step's **Save** button when it looks right:
+
+<p align="center"><img src="docs/images/calibration.png" width="300" alt="Servo calibration page"></p>
 
 1. **Look straight ahead** — adjust *Pan* and *Tilt* until both eyes look straight forward. Use **Check: look right / look up** to confirm the eyes move the right way; if one goes the wrong way, tick **Reversed** for it and save again.
 2. **Close the lids — just touching** — with the eyes straight ahead, move each of the four eyelids until the upper and lower lid of each eye *just touch*. Don't squeeze them together: this is the point blinks, winks and sleep close to, and pressing the lids against each other strains the servos.

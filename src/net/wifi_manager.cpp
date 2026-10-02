@@ -1,6 +1,7 @@
 #include "net/wifi_manager.h"
 
 #include <DNSServer.h>
+#include <ESPmDNS.h>
 #include <WiFi.h>
 
 #include <atomic>
@@ -10,6 +11,7 @@
 
 #include <esp_wifi.h>
 
+#include "motion/eye_pose.h" // deadlineReached()
 #include "storage/nvs_store.h"
 
 namespace {
@@ -32,6 +34,12 @@ String gApSsid;
 uint32_t gStaConnectStartMs = 0;
 uint32_t gStaFailedAtMs = 0;
 bool gApActive = false;
+bool gMdnsStarted = false;
+// A failed mDNS start is retried this often while the link stays up;
+// otherwise the .local name stayed gone until the next reconnect.
+constexpr uint32_t kMdnsRetryMs = 30000;
+bool gMdnsRetryPending = false;
+uint32_t gMdnsRetryAtMs = 0;
 
 // How long STA_FAILED is left in place (observable via GET
 // /api/system/status's wifiMode) before falling back to AP mode.
@@ -255,6 +263,35 @@ void beginStaConnect(const String &ssid, const String &password) {
   }
 }
 
+// mDNS makes the device reachable as http://<hostname>.local (default
+// esp-magic-eyes.local), the address the README tells users to open.
+// Owned here, not by ArduinoOTA: ArduinoOTA.end() calls MDNS.end(), so
+// the name used to vanish whenever network OTA stopped (admin password
+// changed, OTA disabled, auth storage error). Started once and never
+// ended: the IDF mDNS responder re-announces on its own after reconnects.
+void startMdnsOnce() {
+  if (gMdnsStarted) {
+    return;
+  }
+  String hostname = NvsStore::getHostname();
+  if (!MDNS.begin(hostname)) {
+    // begin() can fail after mdns_init() already succeeded (hostname set
+    // failed); free it, or every retry's mdns_init() fails as well.
+    MDNS.end();
+    gMdnsRetryPending = true;
+    gMdnsRetryAtMs = millis() + kMdnsRetryMs;
+    Serial.println("[WiFi] mDNS failed to start, retrying in 30 s.");
+    return;
+  }
+  gMdnsRetryPending = false;
+  MDNS.setInstanceName(NvsStore::getDeviceName());
+  MDNS.addService("http", "tcp", 80);
+  gMdnsStarted = true;
+  Serial.print("[WiFi] mDNS: http://");
+  Serial.print(hostname);
+  Serial.println(".local/");
+}
+
 } // namespace
 
 namespace WifiManager {
@@ -264,6 +301,10 @@ void begin() {
   // WiFi driver keep a second copy in its own flash config, which also
   // recorded every attempted (possibly wrong) password.
   WiFi.persistent(false);
+  // Name the STA interface before any WiFi.mode() so DHCP reports it and
+  // the router's device list shows "esp-magic-eyes" rather than the
+  // framework's "esp32-XXXXXX". The framework copies the string.
+  WiFi.setHostname(NvsStore::getHostname().c_str());
   WiFi.onEvent(onWifiEvent);
   gScanMutex = xSemaphoreCreateMutex();
 
@@ -308,6 +349,7 @@ void handle() {
       }
       Serial.print("[WiFi] Connected, IP=");
       Serial.println(WiFi.localIP());
+      startMdnsOnce();
     } else if (!gLinkUpTiming && millis() - gStaConnectStartMs > kStaConnectTimeoutMs) {
       // Not while the link is up and being verified (gLinkUpTiming): a slow
       // router that hands out an IP near the deadline still gets its
@@ -327,6 +369,9 @@ void handle() {
   } else if (gMode == WifiMode::STA_CONNECTED) {
     if (WiFi.isConnected()) {
       gLinkDownTiming = false;
+      if (gMdnsRetryPending && deadlineReached(millis(), gMdnsRetryAtMs)) {
+        startMdnsOnce();
+      }
     } else if (!gLinkDownTiming) {
       gLinkDownTiming = true;
       gLinkDownSinceMs = millis();
@@ -405,6 +450,8 @@ const char *getModeName(WifiMode mode) {
   }
   return "UNKNOWN";
 }
+
+bool mdnsRunning() { return gMdnsStarted; }
 
 String getIpAddress() {
   if (gMode == WifiMode::STA_CONNECTED) {
