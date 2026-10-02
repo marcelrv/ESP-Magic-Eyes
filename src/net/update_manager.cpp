@@ -11,6 +11,7 @@
 #include <time.h>
 
 #include "esp_partition.h"
+#include "api/ota_routes.h"
 #include "motion/eye_pose.h" // deadlineReached()
 #include "net/wifi_manager.h"
 #include "version.h"
@@ -369,7 +370,11 @@ void runInstall(UpdateManager::Channel channel) {
   if (!err.isEmpty()) return failInstall("Filesystem image: " + err);
   const esp_partition_t *fsPart = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, nullptr);
   if (!fsPart) return failInstall("No filesystem partition found");
-  if (fsSize > 0 && (uint32_t)fsSize > fsPart->size) return failInstall("Filesystem image does not fit the partition");
+  // No Content-Length (-1) would make Update.begin() assume "fills the
+  // partition", so an oversize image would only fail after the firmware is
+  // already switched. Pages always sends the length; refuse if that changes.
+  if (fsSize <= 0) return failInstall("Filesystem image: server did not report its size");
+  if ((uint32_t)fsSize > fsPart->size) return failInstall("Filesystem image does not fit the partition");
 
   err = streamToUpdate(*client, m.firmwareUrl, U_FLASH, "firmware");
   if (!err.isEmpty()) return failInstall("Firmware: " + err);
@@ -408,7 +413,7 @@ bool startWorker(bool install, UpdateManager::Channel channel, String &error) {
     error = "Updating over WiFi needs a connection to your home network";
     return false;
   }
-  if (gRestartPending) {
+  if (gRestartPending || OtaRoutes::restartPending()) {
     error = "An update was just installed; the device is restarting";
     return false;
   }
@@ -466,7 +471,10 @@ bool startCheck(String &error) { return startWorker(false, Channel::STABLE, erro
 
 bool startInstall(Channel channel, String &error) { return startWorker(true, channel, error); }
 
-bool installing() { return gInstalling; }
+// Stays true through the deferred restart too: the worker has finished (so
+// Update.h is idle) but the reboot is still due, and a manual upload started
+// in that gap would be cut off mid-write.
+bool installing() { return gInstalling || gRestartPending; }
 
 CheckResult getCheck() {
   std::lock_guard<std::mutex> lock(gMutex);

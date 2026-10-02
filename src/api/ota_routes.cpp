@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
+#include <atomic>
 #include <Update.h>
 
 #include "api/json_helpers.h"
@@ -28,7 +29,8 @@ struct OtaStatusState {
 
 OtaStatusState gStatus;
 
-bool gRestartPending = false;
+// Atomic: set on the AsyncTCP task, read by loop() and the update worker.
+std::atomic<bool> gRestartPending{false};
 uint32_t gRestartAtMs = 0;
 // Gives AsyncTCP time to actually flush the HTTP response to the client
 // before the reboot tears the connection down.
@@ -273,6 +275,8 @@ void registerRoutes(AsyncWebServer &server) {
   server.on("/api/ota/filesystem", HTTP_POST, sendOtaResultResponse, handleFilesystemUpload);
   server.on("/api/ota/status", HTTP_GET, handleOtaStatus);
 }
+
+bool restartPending() { return gRestartPending; }
 
 void handle() {
   if (gRestartPending && millis() >= gRestartAtMs) {

@@ -29,4 +29,8 @@ void registerRoutes(AsyncWebServer &server);
 // the client.
 void handle();
 
+// True between a successful manual upload and the reboot it schedules. The
+// WiFi updater refuses to start in that window (a reboot would cut it off).
+bool restartPending();
+
 } // namespace OtaRoutes
