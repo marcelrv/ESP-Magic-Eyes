@@ -194,5 +194,9 @@ const Api = (() => {
 
     // --- OTA -------------------------------------------------------------------
     getOtaStatus: () => get("/api/ota/status"),
+    // Internet update: start a check, poll its result, then install a channel.
+    checkForUpdates: () => post("/api/ota/check"),
+    getUpdateCheck: () => get("/api/ota/check"),
+    installUpdate: (channel) => post("/api/ota/install", { channel }),
   };
 })();

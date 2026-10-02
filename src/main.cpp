@@ -24,6 +24,7 @@
 #include "net/auth.h"
 #include "net/ota_manager.h"
 #include "net/serial_console.h"
+#include "net/update_manager.h"
 #include "net/web_server.h"
 #include "net/wifi_manager.h"
 #include "radar/radar_task.h"
@@ -105,6 +106,7 @@ void loop() {
   SerialConsole::handle(); // "wifi set ..." etc. — WiFi recovery with physical access
   OtaManager::handle();  // starts/stops + pumps ArduinoOTA, non-blocking
   OtaRoutes::handle();   // fires the deferred restart after a web OTA
+  UpdateManager::handle(); // ...and after a check-and-install over WiFi
   WifiRoutes::handle();  // fires the deferred restart after POST /api/wifi/forget
   RestRoutes::handle();  // fires the deferred restart after POST /api/system/reboot
   RadarRoutes::handle(); // fires the deferred restart after POST /api/radar/config
