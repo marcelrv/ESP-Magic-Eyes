@@ -234,6 +234,7 @@ data/www/
   index.html          landing page — links to Control / Setup, live status; prompts WiFi setup if in AP mode
   css/app.css          shared styling, mobile-first, distinct "control" vs "setup" (amber/maintenance) theming
   js/api.js            shared fetch wrapper, pollEvery() live-refresh helper, throttle(), XHR upload-with-progress helper
+  js/eyes.js           live cartoon eyes (home + manual pages): polls /api/eyes/pose every 150 ms and draws the *commanded* pan/tilt/lids; no servo feedback exists
   control/
     manual.html         2D drag gaze pad + eyelid sliders + natural-mode toggle + gesture buttons
     playmodes.html       play mode cards (activate/status)
