@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Same eye as js/eyes.js draws, fixed colours (a favicon cannot use the page theme). -->
+  <circle cx="50" cy="50" r="46" fill="#fff" stroke="#5b6472" stroke-width="5"/>
+  <circle cx="50" cy="50" r="24" fill="#2f6fed"/>
+  <circle cx="50" cy="50" r="12" fill="#0c1220"/>
+  <circle cx="58" cy="41" r="5.5" fill="#fff" opacity="0.9"/>
+</svg>

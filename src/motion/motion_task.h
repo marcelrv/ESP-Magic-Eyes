@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include <cstddef>
+
 #include "motion/eye_pose.h"
 
 namespace MotionTask {
@@ -20,6 +22,34 @@ void begin();
 // a short-held mutex around a plain struct copy so callers never observe
 // a torn/partially-updated EyePose.
 EyePose getCurrentPose();
+
+// The interpolation segment one axis is currently on. Exists so a viewer
+// (the web UI's live eyes) can evaluate the same curve locally at its own
+// frame rate instead of sampling getCurrentPose() fast enough to catch a
+// 40 ms fully-closed blink hold: one reply describes the whole motion up to
+// the next command.
+struct AxisSegment {
+  float from = 0.0f;
+  float to = 0.0f;
+  uint32_t durationMs = 0;  // 0 == already at `to`
+  uint32_t elapsedMs = 0;   // since segment start, capped at durationMs
+  Easing easing = Easing::Linear;
+};
+
+constexpr size_t kPoseAxisCount = 6;
+
+struct PoseSegments {
+  // Order = EyePose fields: pan, tilt, lidUpperL, lidLowerL, lidUpperR, lidLowerR.
+  AxisSegment axis[kPoseAxisCount];
+  // Calibration hold active: the servos follow raw pulses, so neither this
+  // nor getCurrentPose() describes where they are.
+  bool held = false;
+};
+
+// Thread-safe like getCurrentPose() (same mutex, same short timeout).
+// elapsedMs is taken at call time, so the viewer can anchor the segment to
+// its own clock at the moment the reply arrives.
+PoseSegments getPoseSegments();
 
 // Monotonically increasing counter (Phase 4, deferred from Phase 3 — see
 // plan §2), bumped whenever a new EXTERNALLY-sourced command sequence

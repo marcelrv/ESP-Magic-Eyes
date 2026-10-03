@@ -10,8 +10,10 @@
 //                              commandGeneration
 //   POST /api/eyes/natural  — {enabled}, live natural-mode toggle
 //                              (NaturalModeCoupler::setEnabled())
-//   GET  /api/eyes/pose     — thin wrapper around
-//                              MotionTask::getCurrentPose()
+//   GET  /api/eyes/pose     — MotionTask::getCurrentPose() (six values)
+//                              plus `held` and `seg`, the per-axis
+//                              interpolation segments from
+//                              MotionTask::getPoseSegments()
 
 #pragma once
 

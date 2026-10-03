@@ -453,6 +453,8 @@ footer.app-footer {
   font-size: 0.78rem;
   text-align: center;
 }
+/* The project link: footer-coloured, underlined so it still reads as a link. */
+footer.app-footer a { color: inherit; text-decoration: underline; }
 
 /* --- Live eyes (js/eyes.js) --------------------------------------------- */
 .eyes-view { display: flex; justify-content: center; gap: 1.1rem; transition: opacity 0.2s; }
@@ -464,9 +466,7 @@ footer.app-footer {
 .eyes-view .lid { fill: var(--eye-lid); transform-box: fill-box; }
 .eyes-view .lid-upper { transform-origin: 50% 0; }
 .eyes-view .lid-lower { transform-origin: 50% 100%; }
-/* Linear and about one poll long, so the steps between samples read as motion. */
-.eyes-view .look, .eyes-view .lid { transition: transform 90ms linear; }
 .eyes-view.eyes-stale { opacity: 0.35; }
 @media (prefers-reduced-motion: reduce) {
-  .eyes-view, .eyes-view .look, .eyes-view .lid { transition: none; }
+  .eyes-view { transition: none; }
 }
