@@ -134,14 +134,19 @@
 
       show(dashboard);
       hide(setupPrompt);
-      MagicEyes.mount(document.getElementById('live-eyes'));
-
       document.getElementById('stat-wifi').textContent = status.wifiMode || '—';
       document.getElementById('stat-ip').textContent = status.ipAddress || '—';
       document.getElementById('stat-playmode').textContent = status.playMode || '—';
       document.getElementById('stat-natural').textContent = status.naturalMode ? 'on' : 'off';
       document.getElementById('stat-radar').textContent = info.radarVariant || '—';
       document.getElementById('stat-fw').textContent = info.firmwareVersion || '—';
+
+      // Decorative: after the stats, and guarded, so it can never reach the
+      // .catch below and replace a working dashboard with the load-error card.
+      if (typeof MagicEyes !== 'undefined') {
+        try { MagicEyes.mount(document.getElementById('live-eyes')); }
+        catch (e) { console.error('live eyes failed', e); }
+      }
     })
     .catch(function (err) {
       show(loadError);

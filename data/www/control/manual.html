@@ -99,7 +99,7 @@
 <script src="../js/eyes.js"></script>
 <script>
 (function () {
-  var GAZE_RANGE_DEG = 45; // matches MotionTask's documented pan/tilt working range
+  var GAZE_RANGE_DEG = Api.GAZE_RANGE_DEG; // MotionTask's pan/tilt working range
 
   var pad = document.getElementById('gaze-pad');
   var thumb = document.getElementById('gaze-thumb');
@@ -162,7 +162,11 @@
   function endDrag(e) {
     if (!dragging) return;
     dragging = false;
-    setTimeout(function () { suppressPoseUpdates = false; }, 300);
+    // 500 ms: the trailing throttled send can go out up to 70 ms after release,
+    // then comes its request round trip and the 120 ms ease. Until that has
+    // finished the ~12 Hz pose samples still show the old gaze, and applying
+    // one would snap the thumb back before it catches up.
+    setTimeout(function () { suppressPoseUpdates = false; }, 500);
   }
   pad.addEventListener('pointerup', endDrag);
   pad.addEventListener('pointercancel', endDrag);
@@ -221,7 +225,10 @@
     if (status.pose) {
       var nx = status.pose.panDeg / GAZE_RANGE_DEG;
       var ny = -status.pose.tiltDeg / GAZE_RANGE_DEG;
-      setThumbFromNormalized(Math.max(-1, Math.min(1, nx)), Math.max(-1, Math.min(1, ny)));
+      // Same unit-circle clamp as the live eyes, so both indicators agree.
+      var mag = Math.hypot(nx, ny);
+      if (mag > 1) { nx /= mag; ny /= mag; }
+      setThumbFromNormalized(nx, ny);
       updateReadout(status.pose.panDeg, status.pose.tiltDeg);
     }
     lidIds.forEach(function (id) {
@@ -236,15 +243,18 @@
   });
 
   // The live eyes poll the pose; the gaze pad follows the same samples.
-  MagicEyes.mount(document.getElementById('live-eyes'), {
-    onPose: function (pose) {
-      if (dragging || suppressPoseUpdates) return;
-      var nx = pose.panDeg / GAZE_RANGE_DEG;
-      var ny = -pose.tiltDeg / GAZE_RANGE_DEG;
-      setThumbFromNormalized(Math.max(-1, Math.min(1, nx)), Math.max(-1, Math.min(1, ny)));
-      updateReadout(pose.panDeg, pose.tiltDeg);
-    }
-  });
+  // Decorative, so guarded: without it the pad just keeps the initial state.
+  if (typeof MagicEyes !== 'undefined') {
+    try {
+      MagicEyes.mount(document.getElementById('live-eyes'), {
+        onPose: function (pose, nx, ny) {
+          if (dragging || suppressPoseUpdates) return;
+          setThumbFromNormalized(nx, ny);
+          updateReadout(pose.panDeg, pose.tiltDeg);
+        }
+      });
+    } catch (e) { console.error('live eyes failed', e); }
+  }
 })();
 </script>
 </body>

@@ -455,7 +455,7 @@ footer.app-footer {
 }
 
 /* --- Live eyes (js/eyes.js) --------------------------------------------- */
-.eyes-view { display: flex; justify-content: center; gap: 1.1rem; }
+.eyes-view { display: flex; justify-content: center; gap: 1.1rem; transition: opacity 0.2s; }
 .eyes-view .eye { width: min(30vw, 130px); height: auto; }
 .eyes-view .sclera { fill: var(--eye-sclera); stroke: var(--border); stroke-width: 1; }
 .eyes-view .iris { fill: var(--eye-iris); }
@@ -468,5 +468,5 @@ footer.app-footer {
 .eyes-view .look, .eyes-view .lid { transition: transform 90ms linear; }
 .eyes-view.eyes-stale { opacity: 0.35; }
 @media (prefers-reduced-motion: reduce) {
-  .eyes-view .look, .eyes-view .lid { transition: none; }
+  .eyes-view, .eyes-view .look, .eyes-view .lid { transition: none; }
 }

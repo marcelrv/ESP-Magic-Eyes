@@ -18,8 +18,11 @@ const Api = (() => {
     return (data && (data.error || data.message)) || ("HTTP " + status);
   }
 
-  async function request(method, path, body) {
+  // signal (optional): an AbortSignal, for callers that give up on a request
+  // themselves (the live eyes abort a pose request that hangs).
+  async function request(method, path, body, signal) {
     const opts = { method };
+    if (signal) opts.signal = signal;
     if (body !== undefined) {
       opts.headers = { "Content-Type": "application/json" };
       opts.body = JSON.stringify(body);
@@ -40,7 +43,7 @@ const Api = (() => {
     return data;
   }
 
-  const get = (path) => request("GET", path);
+  const get = (path, signal) => request("GET", path, undefined, signal);
   const post = (path, body) => request("POST", path, body === undefined ? {} : body);
 
   // Calls fn() immediately, then again every intervalMs, forever, until the
@@ -139,6 +142,10 @@ const Api = (() => {
   }
 
   return {
+    // Mirrors the firmware's kGazeRangeDeg in src/motion/motion_task.cpp; used
+    // by the gaze pad, the live eyes and calibration.
+    GAZE_RANGE_DEG: 45,
+
     get,
     post,
     pollEvery,
@@ -170,7 +177,7 @@ const Api = (() => {
     // --- manual eye control ----------------------------------------------
     setGaze: (fields) => post("/api/eyes/gaze", fields),
     setEyelids: (fields) => post("/api/eyes/eyelids", fields),
-    getPose: () => get("/api/eyes/pose"),
+    getPose: (signal) => get("/api/eyes/pose", signal),
     setNaturalMode: (enabled) => post("/api/eyes/natural", { enabled }),
 
     // --- gestures ---------------------------------------------------------

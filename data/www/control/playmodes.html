@@ -38,7 +38,6 @@
 <script src="../js/eyes.js"></script>
 <script>
 (function () {
-  MagicEyes.mount(document.getElementById('live-eyes'));
   var listEl = document.getElementById('mode-list');
   var msgEl = document.getElementById('msg');
   var modes = [];
@@ -91,6 +90,12 @@
       }
     });
   }, 2000, function (err) { console.warn('active-mode poll failed', err); });
+
+  // Decorative, so last and guarded: a failure here must not take the page down.
+  if (typeof MagicEyes !== 'undefined') {
+    try { MagicEyes.mount(document.getElementById('live-eyes')); }
+    catch (e) { console.error('live eyes failed', e); }
+  }
 })();
 </script>
 </body>
