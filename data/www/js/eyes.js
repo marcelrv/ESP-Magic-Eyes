@@ -24,7 +24,11 @@
 // reply's segment is already finished, or the firmware is too old to send
 // `seg` (then the six plain values are targets and the poll runs back-to-back,
 // POLL_GAP_MS between requests, ~12 samples/s), a displayed value that is off
-// the new target is glided there over SNAP_MS instead of snapping.
+// the new target is glided there over SNAP_MS instead of snapping. A segment
+// that is still running but not where the eyes are drawn is finished from the
+// drawn value in its remaining time, except a lid caught only while reopening:
+// that reopening is replayed from fully shut so the blink is not lost. With prefers-reduced-motion nothing is
+// interpolated: each reply shows where the axes are heading.
 //
 // `held: true` means the calibration page has the servos on raw pulses: the
 // pose describes nothing real, so the eyes are dimmed and kept as they are
@@ -154,6 +158,21 @@ const MagicEyes = (() => {
     let rafId = null;
     let dirty = false;       // a reply landed since the last drawn frame
 
+    // prefers-reduced-motion: the CSS rule only covers the opacity fade, the
+    // pose is animated here. Asked per reply so a changed setting applies
+    // without a reload.
+    const motionQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+    function reducedMotion() { return !!motionQuery && motionQuery.matches; }
+
+    // Stops every axis where it is drawn right now.
+    function freeze(now) {
+      for (let i = 0; i < FIELDS.length; i++) {
+        const v = segValue(segs[i], now);
+        segs[i] = { from: v, to: v, durationMs: 0, easing: 0, startAt: now };
+      }
+      dirty = true;
+    }
+
     function currentPose(t) {
       const p = {};
       for (let i = 0; i < FIELDS.length; i++) p[FIELDS[i]] = segValue(segs[i], t);
@@ -173,8 +192,25 @@ const MagicEyes = (() => {
         } else {
           s = { from: p[FIELDS[i]], to: p[FIELDS[i]], durationMs: 0, easing: 0, startAt: now };
         }
-        // Finished (or no segment info) and not where we are drawn: glide, not snap.
-        if (segDone(s, now) && Math.abs(shown[i] - s.to) > (i < 2 ? GAZE_EPS_DEG : LID_EPS)) {
+        const eps = i < 2 ? GAZE_EPS_DEG : LID_EPS;
+        if (reducedMotion()) {
+          // No interpolation at all: show where each axis is heading.
+          s = { from: s.to, to: s.to, durationMs: 0, easing: 0, startAt: now };
+        } else if (!segDone(s, now)) {
+          // Mid-segment but not where we are drawn (first reply, a missed
+          // segment, the end of a hold): finish it from the drawn value in the
+          // time it has left, instead of jumping onto the curve.
+          if (i >= 2 && s.to > s.from && shown[i] - s.from > eps) {
+            // A lid reopening from further shut than it is drawn: the closing
+            // half of a blink fell between two replies. Play the reopening
+            // from its start (a moment late) so the blink is seen fully shut;
+            // easing in from the drawn value would hide it.
+            s.startAt = now;
+          } else if (Math.abs(shown[i] - segValue(s, now)) > eps) {
+            s = { from: shown[i], to: s.to, durationMs: s.durationMs - (now - s.startAt), easing: s.easing, startAt: now };
+          }
+        } else if (Math.abs(shown[i] - s.to) > eps) {
+          // Finished (or no segment info) and not where we are drawn: glide, not snap.
           s = { from: shown[i], to: s.to, durationMs: SNAP_MS, easing: 0, startAt: now };
         }
         segs[i] = s;
@@ -266,6 +302,9 @@ const MagicEyes = (() => {
           if (p.held === true) {
             // Calibration owns the servos: the pose is fiction. Keep the eyes
             // as they are but dimmed, and do not re-arm the watchdog as fresh.
+            // Frozen, or a segment still running (a gaze move can last up to
+            // 60 s) would keep animating under the dimming.
+            freeze(performance.now());
             clearWatchdog();
             markStale();
           } else {
