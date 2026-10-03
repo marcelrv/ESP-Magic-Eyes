@@ -67,7 +67,7 @@ Layered design:
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Note on realtime telemetry**: the original design allowed for a WebSocket telemetry channel (`/ws`) alongside REST. No WebSocket infrastructure was implemented — no phase of the build needed it, and the frontend's `js/api.js` `pollEvery()` helper covers live status/pose/radar updates via REST polling at page-appropriate intervals (fast for the radar visualization page, slower elsewhere). The API layer is written so a WS channel could be added later without restructuring routes.
+**Note on realtime telemetry**: the original design allowed for a WebSocket telemetry channel (`/ws`) alongside REST. No WebSocket infrastructure was implemented — no phase of the build needed it, and the frontend's `js/api.js` `pollEvery()` helper covers live status/pose/radar updates via REST polling at page-appropriate intervals (the live eyes on the control pages are the fastest poller, ~12 `/api/eyes/pose` samples/s per visible page; status, radar and the rest poll every 0.7-3 s). The API layer is written so a WS channel could be added later without restructuring routes.
 
 ### Concurrency & interruptibility model
 
@@ -234,6 +234,7 @@ data/www/
   index.html          landing page — links to Control / Setup, live status; prompts WiFi setup if in AP mode
   css/app.css          shared styling, mobile-first, distinct "control" vs "setup" (amber/maintenance) theming
   js/api.js            shared fetch wrapper, pollEvery() live-refresh helper, throttle(), XHR upload-with-progress helper
+  js/eyes.js           live cartoon eyes (home, manual, play-mode and status pages): polls /api/eyes/pose back-to-back (next request 30 ms after the last answer, ~12 samples/s per visible page), backs off on errors, pauses while hidden or off-screen; draws the *commanded* pan/tilt/lids; no servo feedback exists
   control/
     manual.html         2D drag gaze pad + eyelid sliders + natural-mode toggle + gesture buttons
     playmodes.html       play mode cards (activate/status)

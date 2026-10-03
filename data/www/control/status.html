@@ -26,6 +26,10 @@
   <div id="msg" class="msg msg-error hidden"></div>
 
   <div class="card">
+    <div id="live-eyes"></div>
+  </div>
+
+  <div class="card">
     <h3>Connection</h3>
     <div class="grid cols-2">
       <div class="stat"><span class="stat-label">WiFi mode</span><span class="stat-value" id="s-wifiMode">&mdash;</span></div>
@@ -58,11 +62,21 @@
 <footer class="app-footer">ESP Magic Eyes &mdash; live status</footer>
 
 <script src="../js/api.js"></script>
+<script src="../js/eyes.js"></script>
 <script>
 (function () {
   var msgEl = document.getElementById('msg');
   function showError(text) { msgEl.textContent = text; msgEl.classList.remove('hidden'); }
   function clearError() { msgEl.classList.add('hidden'); }
+
+  function showPose(pose) {
+    document.getElementById('s-pantilt').textContent =
+      pose.panDeg.toFixed(1) + '° / ' + pose.tiltDeg.toFixed(1) + '°';
+    document.getElementById('s-lids').textContent =
+      [pose.lidUpperL, pose.lidLowerL, pose.lidUpperR, pose.lidLowerR]
+        .map(function (v) { return v.toFixed(2); }).join(' / ');
+  }
+  var eyesMounted = false;
 
   function fmtUptime(ms) {
     var s = Math.floor(ms / 1000);
@@ -79,13 +93,9 @@
       document.getElementById('s-ip').textContent = status.ipAddress || '—';
       document.getElementById('s-mode').textContent = status.playMode || '—';
       document.getElementById('s-natural').textContent = status.naturalMode ? 'on' : 'off';
-      if (status.pose) {
-        document.getElementById('s-pantilt').textContent =
-          status.pose.panDeg.toFixed(1) + '° / ' + status.pose.tiltDeg.toFixed(1) + '°';
-        document.getElementById('s-lids').textContent =
-          [status.pose.lidUpperL, status.pose.lidLowerL, status.pose.lidUpperR, status.pose.lidLowerR]
-            .map(function (v) { return v.toFixed(2); }).join(' / ');
-      }
+      // Only when the live eyes are not running: otherwise the pose comes from
+      // their one endpoint and two sources would fight over these fields.
+      if (!eyesMounted && status.pose) showPose(status.pose);
     });
   }, 700, function (err) { showError('Status polling failed: ' + err.message); });
 
@@ -126,6 +136,15 @@
   Api.getRadarStatus().then(function (s) {
     document.getElementById('radar-model').textContent = s.sensorModel ? ('(' + s.sensorModel + ')') : '';
   }).catch(function () { /* non-fatal */ });
+
+  // Decorative, so last and guarded. Throttled so the numbers stay readable at
+  // ~12 samples/s.
+  if (typeof MagicEyes !== 'undefined') {
+    try {
+      MagicEyes.mount(document.getElementById('live-eyes'), { onPose: Api.throttle(showPose, 200) });
+      eyesMounted = true;
+    } catch (e) { console.error('live eyes failed', e); }
+  }
 })();
 </script>
 </body>

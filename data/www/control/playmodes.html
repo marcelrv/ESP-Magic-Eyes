@@ -23,6 +23,9 @@
 </nav>
 
 <main class="container">
+  <div class="card">
+    <div id="live-eyes"></div>
+  </div>
   <div id="msg" class="msg msg-error hidden"></div>
   <div class="grid" id="mode-list">
     <p class="muted small">Loading play modes&hellip;</p>
@@ -32,6 +35,7 @@
 <footer class="app-footer">ESP Magic Eyes &mdash; play modes</footer>
 
 <script src="../js/api.js"></script>
+<script src="../js/eyes.js"></script>
 <script>
 (function () {
   var listEl = document.getElementById('mode-list');
@@ -86,6 +90,12 @@
       }
     });
   }, 2000, function (err) { console.warn('active-mode poll failed', err); });
+
+  // Decorative, so last and guarded: a failure here must not take the page down.
+  if (typeof MagicEyes !== 'undefined') {
+    try { MagicEyes.mount(document.getElementById('live-eyes')); }
+    catch (e) { console.error('live eyes failed', e); }
+  }
 })();
 </script>
 </body>
