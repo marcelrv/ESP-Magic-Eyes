@@ -56,6 +56,13 @@ const MagicEyes = (() => {
   const SNAP_MS = 90;          // glide length when a displayed value is off the new target
   const GAZE_EPS_DEG = 0.5;    // "off target" thresholds for that glide
   const LID_EPS = 0.01;
+  // A reopening lid drawn this much more open than the device reports means a
+  // blink's closing half was missed (see applySamples). Well above what answer
+  // time jitter produces on a segment that is simply being followed.
+  const BLINK_MISSED_LID = 0.2;
+  // Two replies describe the same running segment if its values match and its
+  // start, on our clock, agrees within this (answer times vary by ~100 ms).
+  const SAME_SEG_SLACK_MS = 250;
   // Axis order of `seg`, same as the API's pose fields.
   const FIELDS = ['panDeg', 'tiltDeg', 'lidUpperL', 'lidLowerL', 'lidUpperR', 'lidLowerR'];
   const REQUEST_TIMEOUT_MS = 3000;
@@ -188,10 +195,23 @@ const MagicEyes = (() => {
       const useSeg = validSeg(p.seg);
       for (let i = 0; i < FIELDS.length; i++) {
         let s;
+        let src = null;
         if (useSeg) {
           const r = p.seg[i];
           const dur = Math.max(0, r[2]);
           s = { from: r[0], to: r[1], durationMs: dur, easing: r[4], startAt: now - Math.min(Math.max(0, r[3]), dur) };
+          // What the device sent, before any local adjustment below: lets the
+          // next reply recognise the segment this axis is already playing.
+          src = { from: s.from, to: s.to, durationMs: dur, startAt: s.startAt };
+          const cur = segs[i].src;
+          if (dur > 0 && !reducedMotion() && cur && cur.from === s.from && cur.to === s.to && cur.durationMs === dur &&
+              Math.abs(cur.startAt - s.startAt) < SAME_SEG_SLACK_MS && !segDone(s, now)) {
+            // Same segment as last time, still running: keep playing our copy
+            // on our own clock. Re-anchoring it on every reply would turn the
+            // jitter in answer times into stutter (and restarted a lid that
+            // was being replayed from shut on each reply).
+            continue;
+          }
         } else {
           s = { from: p[FIELDS[i]], to: p[FIELDS[i]], durationMs: 0, easing: 0, startAt: now };
         }
@@ -203,19 +223,24 @@ const MagicEyes = (() => {
           // Mid-segment but not where we are drawn (first reply, a missed
           // segment, the end of a hold): finish it from the drawn value in the
           // time it has left, instead of jumping onto the curve.
-          if (i >= 2 && s.to > s.from && shown[i] - s.from > eps) {
-            // A lid reopening from further shut than it is drawn: the closing
-            // half of a blink fell between two replies. Play the reopening
-            // from its start (a moment late) so the blink is seen fully shut;
-            // easing in from the drawn value would hide it.
+          const off = shown[i] - segValue(s, now);
+          if (i >= 2 && s.to > s.from && off > BLINK_MISSED_LID) {
+            // A lid reopening, drawn clearly more open than the device has it:
+            // the closing half of a blink fell between two replies. Play the
+            // reopening from its start (a moment late) so the blink is seen
+            // fully shut; easing in from the drawn value would hide it. It
+            // starts on the next drawn frame, not now: on a slow frame the
+            // lid would already be partly open the first time it is drawn.
             s.startAt = now;
-          } else if (Math.abs(shown[i] - segValue(s, now)) > eps) {
+            s.startOnFrame = true;
+          } else if (Math.abs(off) > eps) {
             s = { from: shown[i], to: s.to, durationMs: s.durationMs - (now - s.startAt), easing: s.easing, startAt: now };
           }
         } else if (Math.abs(shown[i] - s.to) > eps) {
           // Finished (or no segment info) and not where we are drawn: glide, not snap.
           s = { from: shown[i], to: s.to, durationMs: SNAP_MS, easing: 0, startAt: now };
         }
+        s.src = src;   // survives the glide/rebase replacements above
         segs[i] = s;
       }
       dirty = true;
@@ -233,6 +258,7 @@ const MagicEyes = (() => {
       const t = performance.now();
       let moving = false;
       for (let i = 0; i < FIELDS.length; i++) {
+        if (segs[i].startOnFrame) { segs[i].startAt = t; segs[i].startOnFrame = false; }
         if (!segDone(segs[i], t)) moving = true;
       }
       // Idle: nothing changes between replies, so skip the style writes.
