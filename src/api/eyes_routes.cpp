@@ -149,6 +149,26 @@ void handleGetPose(AsyncWebServerRequest *request) {
   doc["lidLowerL"] = pose.lidLowerL;
   doc["lidUpperR"] = pose.lidUpperR;
   doc["lidLowerR"] = pose.lidLowerR;
+
+  // The six values above stay for the status page and older UI builds. The
+  // live eyes use `seg` instead: per axis (pan, tilt, lidUpperL, lidLowerL,
+  // lidUpperR, lidLowerR) [from, to, durationMs, elapsedMs, easing], which the
+  // browser evaluates itself at its frame rate, so a blink is drawn exactly
+  // from ~4-5 requests/s. `held`: calibration owns the servos, so neither the
+  // values nor `seg` describe them.
+  MotionTask::PoseSegments segments = MotionTask::getPoseSegments();
+  doc["held"] = segments.held;
+  JsonArray seg = doc["seg"].to<JsonArray>();
+  for (const MotionTask::AxisSegment &a : segments.axis) {
+    JsonArray row = seg.add<JsonArray>();
+    row.add(a.from);
+    row.add(a.to);
+    row.add(a.durationMs);
+    row.add(a.elapsedMs);
+    // API values, keep stable: 0 = linear, 1 = easeInOut (not the enum's
+    // underlying numbers, which are an internal detail).
+    row.add(a.easing == Easing::EaseInOut ? 1 : 0);
+  }
   sendJson(request, doc);
 }
 

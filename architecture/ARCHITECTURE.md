@@ -67,7 +67,7 @@ Layered design:
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Note on realtime telemetry**: the original design allowed for a WebSocket telemetry channel (`/ws`) alongside REST. No WebSocket infrastructure was implemented — no phase of the build needed it, and the frontend's `js/api.js` `pollEvery()` helper covers live status/pose/radar updates via REST polling at page-appropriate intervals (the live eyes on the control pages are the fastest poller, ~12 `/api/eyes/pose` samples/s per visible page; status, radar and the rest poll every 0.7-3 s). The API layer is written so a WS channel could be added later without restructuring routes.
+**Note on realtime telemetry**: the original design allowed for a WebSocket telemetry channel (`/ws`) alongside REST. No WebSocket infrastructure was implemented — no phase of the build needed it, and the frontend's `js/api.js` `pollEvery()` helper covers live status/pose/radar updates via REST polling at page-appropriate intervals (the live eyes on the control pages are the fastest poller, ~4-5 `/api/eyes/pose` requests/s per visible page, animated locally from the returned interpolation segments; status, radar and the rest poll every 0.7-3 s). The API layer is written so a WS channel could be added later without restructuring routes.
 
 ### Concurrency & interruptibility model
 
@@ -129,7 +129,7 @@ Base path `/api`. Every route needs the **Control** or **Admin** password once t
 - `POST /api/eyes/gaze` `{pan, tilt, durationMs, easing}` — degrees, ±45° convention (see §6's degrees-to-pulse mapping), `source=Manual`
 - `POST /api/eyes/eyelids` `{upperL?, lowerL?, upperR?, lowerR?, durationMs}` — normalized 0 (closed) .. 1 (open), each field optional/partial
 - `POST /api/eyes/natural` `{enabled}` — natural-mode toggle, control level
-- `GET /api/eyes/pose` — current pose snapshot
+- `GET /api/eyes/pose` — current pose snapshot: `panDeg`, `tiltDeg`, `lidUpperL`, `lidLowerL`, `lidUpperR`, `lidLowerR`, plus `held` (calibration hold active: servos follow raw pulses, the values describe nothing real) and `seg`, the interpolation segment each axis is on, one `[from, to, durationMs, elapsedMs, easing]` per axis in that field order (easing 0 linear / 1 easeInOut; `durationMs` 0 = at `to`). The browser evaluates the same curve itself, so a blink needs no fast sampling
 
 **Gestures**
 - `GET /api/gestures` — `blink`, `wink_left`, `wink_right`, `surprise`, `sleepy`, `squint` (alias `suspicious`), `look_around_quick`, `double_blink`, `roll_eyes`
@@ -234,7 +234,7 @@ data/www/
   index.html          landing page — links to Control / Setup, live status; prompts WiFi setup if in AP mode
   css/app.css          shared styling, mobile-first, distinct "control" vs "setup" (amber/maintenance) theming
   js/api.js            shared fetch wrapper, pollEvery() live-refresh helper, throttle(), XHR upload-with-progress helper
-  js/eyes.js           live cartoon eyes (home, manual, play-mode and status pages): polls /api/eyes/pose back-to-back (next request 30 ms after the last answer, ~12 samples/s per visible page), backs off on errors, pauses while hidden or off-screen; draws the *commanded* pan/tilt/lids; no servo feedback exists
+  js/eyes.js           live cartoon eyes (home, manual, play-mode and status pages): polls /api/eyes/pose (~4-5 requests/s per visible page with current firmware, animated locally with requestAnimationFrame from the per-axis `seg` segments; falls back to back-to-back sampling, ~12/s, on firmware without `seg`; dims while `held`), backs off on errors, pauses while hidden or off-screen; draws the *commanded* pan/tilt/lids; no servo feedback exists
   control/
     manual.html         2D drag gaze pad + eyelid sliders + natural-mode toggle + gesture buttons
     playmodes.html       play mode cards (activate/status)
@@ -353,7 +353,7 @@ All nine build phases (scaffold → integration) are complete. PROGRESS.md is th
 
 **Hardware-verified** (LD2420 board): WiFi setup, fallback and recovery (including a wrong password via the API), calibration (hold, NVS migration, half-open point), gestures and abort-restore, sticky manual eyelids, greeting → idle, web OTA (including recovery from an interrupted upload), the WiFi update check, serial console.
 
-**Not yet verified on hardware:** the install half of update-over-WiFi (§8: the streamed firmware + filesystem download and its failure paths; the check itself, with TLS, SNTP and manifest parsing, works on the board), LD2450 decoding and tracking, `millis()` wrap (~49.7 days), NVS write-failure handling, the PR #2 changes (runtime radar selection, AP kept up during retries, async fallback scan, pulse-exact calibration-hold exit, per-request body buffers), and password protection (§4a) in any respect: browser prompts, body/upload guards, lockout, ArduinoOTA `--auth`, and recovery.
+**Not yet verified on hardware:** the pose segments and the live eyes' local animation (`seg`/`held` in `GET /api/eyes/pose`, `js/eyes.js`: blinks drawn exactly at ~4-5 requests/s), the install half of update-over-WiFi (§8: the streamed firmware + filesystem download and its failure paths; the check itself, with TLS, SNTP and manifest parsing, works on the board), LD2450 decoding and tracking, `millis()` wrap (~49.7 days), NVS write-failure handling, the PR #2 changes (runtime radar selection, AP kept up during retries, async fallback scan, pulse-exact calibration-hold exit, per-request body buffers), and password protection (§4a) in any respect: browser prompts, body/upload guards, lockout, ArduinoOTA `--auth`, and recovery.
 
 **Deliberately deferred:**
 - HTTPS, and a configurable setup-AP password (see §4a's known limitations).

@@ -66,6 +66,10 @@ AxisState gAxis[kAxisCount];
 TaskHandle_t gTaskHandle = nullptr;
 SemaphoreHandle_t gPoseMutex = nullptr;
 EyePose gCurrentPose; // only written by the motion task, under gPoseMutex
+// gAxis itself belongs to the motion task alone (no lock on the hot path), so
+// getPoseSegments() reads this copy, published together with gCurrentPose so
+// the two always describe the same tick.
+AxisState gPublishedAxis[kAxisCount];
 
 // See motion_task.h's doc comment for the full commandGeneration
 // mechanism. Bumped from the AsyncTCP/HTTP task (API handlers) and
@@ -404,6 +408,9 @@ void motionTaskFn(void * /*param*/) {
     // from the AsyncTCP/HTTP task) never observes a torn struct.
     xSemaphoreTake(gPoseMutex, portMAX_DELAY);
     gCurrentPose = pose;
+    for (size_t i = 0; i < kAxisCount; ++i) {
+      gPublishedAxis[i] = gAxis[i];
+    }
     xSemaphoreGive(gPoseMutex);
   }
 }
@@ -437,6 +444,9 @@ void begin() {
   initAxis(gAxis[idx(ServoId::LidUpperR)], defaults.lidUpperR, now);
   initAxis(gAxis[idx(ServoId::LidLowerR)], defaults.lidLowerR, now);
   gCurrentPose = defaults;
+  for (size_t i = 0; i < kAxisCount; ++i) {
+    gPublishedAxis[i] = gAxis[i];
+  }
 
   // Phase 4 subsystems: not separate FreeRTOS tasks (plan §2), just RAM-
   // cached state + tables that get ticked from inside this task's own
@@ -456,6 +466,44 @@ EyePose getCurrentPose() {
     xSemaphoreGive(gPoseMutex);
   }
   return snapshot;
+}
+
+PoseSegments getPoseSegments() {
+  static_assert(kAxisCount == kPoseAxisCount, "PoseSegments must cover every interpolated axis");
+  PoseSegments out;
+  AxisState snapshot[kAxisCount];
+  bool ok = false;
+  if (gPoseMutex != nullptr && xSemaphoreTake(gPoseMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+    for (size_t i = 0; i < kAxisCount; ++i) {
+      snapshot[i] = gPublishedAxis[i];
+    }
+    xSemaphoreGive(gPoseMutex);
+    ok = true;
+  }
+  uint32_t now = millis();
+  out.held = holdActive(now);
+  if (!ok) {
+    // Same fallback as getCurrentPose(): EyePose defaults, as finished
+    // segments (from == to, duration 0) so a viewer just holds that pose.
+    EyePose defaults;
+    const float values[kPoseAxisCount] = {defaults.panDeg,    defaults.tiltDeg,   defaults.lidUpperL,
+                                          defaults.lidLowerL, defaults.lidUpperR, defaults.lidLowerR};
+    for (size_t i = 0; i < kPoseAxisCount; ++i) {
+      out.axis[i].from = values[i];
+      out.axis[i].to = values[i];
+    }
+    return out;
+  }
+  for (size_t i = 0; i < kAxisCount; ++i) {
+    const AxisState &a = snapshot[i];
+    uint32_t elapsed = now - a.startTimeMs; // unsigned: wrap-safe
+    out.axis[i].from = a.startValue;
+    out.axis[i].to = a.targetValue;
+    out.axis[i].durationMs = a.durationMs;
+    out.axis[i].elapsedMs = elapsed < a.durationMs ? elapsed : a.durationMs;
+    out.axis[i].easing = a.easing;
+  }
+  return out;
 }
 
 uint32_t bumpCommandGeneration() {
