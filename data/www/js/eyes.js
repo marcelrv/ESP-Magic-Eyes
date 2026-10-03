@@ -5,11 +5,13 @@
 // publishes (the interpolated target it sends to the servos every 20 ms),
 // not a measurement. Needs js/api.js loaded first. Plain global, no build.
 //
-//   MagicEyes.mount(hostElement, { intervalMs: 150, onPose: fn });
+//   MagicEyes.mount(hostElement, { intervalMs: 30, onPose: fn });
 //
-// The poll is fast enough (and the CSS transition long enough) to catch a
-// 300 ms blink; pages that already poll the pose can take it from onPose
-// instead of polling again. Polling pauses while the tab is hidden.
+// A blink is only ~300 ms, so the next request goes out almost as soon as the
+// last one lands (the device answers in 30-100 ms, ~12 samples/s); a slower
+// poll turns a blink into one smoothed-away sample. Pages that already poll
+// the pose can take it from onPose instead of polling again. Polling pauses
+// while the tab is hidden.
 
 const MagicEyes = (() => {
   const GAZE_RANGE_DEG = 45; // same working range as the Manual page's gaze pad
@@ -36,7 +38,7 @@ const MagicEyes = (() => {
 
   function mount(host, opts) {
     opts = opts || {};
-    const intervalMs = opts.intervalMs || 150;
+    const intervalMs = opts.intervalMs || 30;
     const n = ++mounts;
     host.classList.add('eyes-view');
     host.setAttribute('aria-hidden', 'true');

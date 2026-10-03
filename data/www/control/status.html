@@ -26,6 +26,10 @@
   <div id="msg" class="msg msg-error hidden"></div>
 
   <div class="card">
+    <div id="live-eyes"></div>
+  </div>
+
+  <div class="card">
     <h3>Connection</h3>
     <div class="grid cols-2">
       <div class="stat"><span class="stat-label">WiFi mode</span><span class="stat-value" id="s-wifiMode">&mdash;</span></div>
@@ -58,8 +62,10 @@
 <footer class="app-footer">ESP Magic Eyes &mdash; live status</footer>
 
 <script src="../js/api.js"></script>
+<script src="../js/eyes.js"></script>
 <script>
 (function () {
+  MagicEyes.mount(document.getElementById('live-eyes'));
   var msgEl = document.getElementById('msg');
   function showError(text) { msgEl.textContent = text; msgEl.classList.remove('hidden'); }
   function clearError() { msgEl.classList.add('hidden'); }

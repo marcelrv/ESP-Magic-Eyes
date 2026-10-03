@@ -23,6 +23,9 @@
 </nav>
 
 <main class="container">
+  <div class="card">
+    <div id="live-eyes"></div>
+  </div>
   <div id="msg" class="msg msg-error hidden"></div>
   <div class="grid" id="mode-list">
     <p class="muted small">Loading play modes&hellip;</p>
@@ -32,8 +35,10 @@
 <footer class="app-footer">ESP Magic Eyes &mdash; play modes</footer>
 
 <script src="../js/api.js"></script>
+<script src="../js/eyes.js"></script>
 <script>
 (function () {
+  MagicEyes.mount(document.getElementById('live-eyes'));
   var listEl = document.getElementById('mode-list');
   var msgEl = document.getElementById('msg');
   var modes = [];

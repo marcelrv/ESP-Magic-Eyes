@@ -465,7 +465,7 @@ footer.app-footer {
 .eyes-view .lid-upper { transform-origin: 50% 0; }
 .eyes-view .lid-lower { transform-origin: 50% 100%; }
 /* Linear and about one poll long, so the steps between samples read as motion. */
-.eyes-view .look, .eyes-view .lid { transition: transform 150ms linear; }
+.eyes-view .look, .eyes-view .lid { transition: transform 90ms linear; }
 .eyes-view.eyes-stale { opacity: 0.35; }
 @media (prefers-reduced-motion: reduce) {
   .eyes-view .look, .eyes-view .lid { transition: none; }
