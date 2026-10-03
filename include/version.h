@@ -2,7 +2,7 @@
 
 #pragma once
 
-constexpr const char *FIRMWARE_VERSION = "0.2.0-dev";
+constexpr const char *FIRMWARE_VERSION = "0.2.0";
 
 // Short git commit this image was built from, injected by
 // scripts/git_sha.py as -DGIT_SHA. "unknown" when built outside a git
