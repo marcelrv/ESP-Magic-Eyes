@@ -25,6 +25,10 @@
 <main class="container">
 
   <div class="card">
+    <div id="live-eyes"></div>
+  </div>
+
+  <div class="card">
     <h3>Gaze</h3>
     <div class="gaze-pad-wrap">
       <div class="gaze-pad" id="gaze-pad">
@@ -92,6 +96,7 @@
 <footer class="app-footer">ESP Magic Eyes &mdash; manual control</footer>
 
 <script src="../js/api.js"></script>
+<script src="../js/eyes.js"></script>
 <script>
 (function () {
   var GAZE_RANGE_DEG = 45; // matches MotionTask's documented pan/tilt working range
@@ -230,15 +235,16 @@
     showMsg('Could not load current status: ' + err.message, 'error');
   });
 
-  Api.pollEvery(function () {
-    return Api.getPose().then(function (pose) {
+  // The live eyes poll the pose; the gaze pad follows the same samples.
+  MagicEyes.mount(document.getElementById('live-eyes'), {
+    onPose: function (pose) {
       if (dragging || suppressPoseUpdates) return;
       var nx = pose.panDeg / GAZE_RANGE_DEG;
       var ny = -pose.tiltDeg / GAZE_RANGE_DEG;
       setThumbFromNormalized(Math.max(-1, Math.min(1, nx)), Math.max(-1, Math.min(1, ny)));
       updateReadout(pose.panDeg, pose.tiltDeg);
-    });
-  }, 700, function (err) { /* transient poll errors are not surfaced as UI noise */ console.warn('pose poll failed', err); });
+    }
+  });
 })();
 </script>
 </body>

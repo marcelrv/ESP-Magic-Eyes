@@ -29,6 +29,9 @@
   --shadow: 0 1px 3px rgba(20, 20, 30, 0.08), 0 1px 2px rgba(20, 20, 30, 0.06);
   --radius: 10px;
   --gap: 1rem;
+  --eye-sclera: #ffffff;
+  --eye-iris: #2f6fed;
+  --eye-lid: #1b1f24;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -51,6 +54,9 @@
     --setup-accent-dark: #f0ad5c;
     --setup-soft: #3a2611;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+    --eye-sclera: #eef0f2;
+    --eye-iris: #5b8cff;
+    --eye-lid: #0c0d10;
   }
 }
 
@@ -446,4 +452,21 @@ footer.app-footer {
   color: var(--text-muted);
   font-size: 0.78rem;
   text-align: center;
+}
+
+/* --- Live eyes (js/eyes.js) --------------------------------------------- */
+.eyes-view { display: flex; justify-content: center; gap: 1.1rem; }
+.eyes-view .eye { width: min(30vw, 130px); height: auto; }
+.eyes-view .sclera { fill: var(--eye-sclera); stroke: var(--border); stroke-width: 1; }
+.eyes-view .iris { fill: var(--eye-iris); }
+.eyes-view .pupil { fill: #0c1220; }
+.eyes-view .glint { fill: #fff; opacity: 0.85; }
+.eyes-view .lid { fill: var(--eye-lid); transform-box: fill-box; }
+.eyes-view .lid-upper { transform-origin: 50% 0; }
+.eyes-view .lid-lower { transform-origin: 50% 100%; }
+/* Linear and about one poll long, so the steps between samples read as motion. */
+.eyes-view .look, .eyes-view .lid { transition: transform 150ms linear; }
+.eyes-view.eyes-stale { opacity: 0.35; }
+@media (prefers-reduced-motion: reduce) {
+  .eyes-view .look, .eyes-view .lid { transition: none; }
 }

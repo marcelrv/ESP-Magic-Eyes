@@ -35,6 +35,13 @@
   <!-- Normal dashboard -->
   <section id="dashboard" class="hidden">
     <div class="card">
+      <div id="live-eyes"></div>
+      <p class="small muted" style="text-align:center; margin:0.5rem 0 0;">
+        What the eyes are being told to do right now.
+      </p>
+    </div>
+
+    <div class="card">
       <h3>Status</h3>
       <div class="grid cols-2">
         <div class="stat">
@@ -97,6 +104,7 @@
 <footer class="app-footer">ESP Magic Eyes</footer>
 
 <script src="js/api.js"></script>
+<script src="js/eyes.js"></script>
 <script>
 (function () {
   function show(el) { el.classList.remove('hidden'); }
@@ -126,6 +134,7 @@
 
       show(dashboard);
       hide(setupPrompt);
+      MagicEyes.mount(document.getElementById('live-eyes'));
 
       document.getElementById('stat-wifi').textContent = status.wifiMode || '—';
       document.getElementById('stat-ip').textContent = status.ipAddress || '—';
