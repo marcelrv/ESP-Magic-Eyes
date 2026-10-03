@@ -27,8 +27,9 @@
 // the new target is glided there over SNAP_MS instead of snapping. A segment
 // that is still running but not where the eyes are drawn is finished from the
 // drawn value in its remaining time, except a lid caught only while reopening:
-// that reopening is replayed from fully shut so the blink is not lost. With prefers-reduced-motion nothing is
-// interpolated: each reply shows where the axes are heading.
+// that reopening is replayed from fully shut so the blink is not lost. With
+// prefers-reduced-motion nothing is interpolated: each reply shows where the
+// axes are heading.
 //
 // `held: true` means the calibration page has the servos on raw pulses: the
 // pose describes nothing real, so the eyes are dimmed and kept as they are
@@ -164,10 +165,12 @@ const MagicEyes = (() => {
     const motionQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
     function reducedMotion() { return !!motionQuery && motionQuery.matches; }
 
-    // Stops every axis where it is drawn right now.
+    // Stops every axis where it is drawn right now: the last drawn value, not
+    // the curve's value at `now`, which is up to a frame further along and
+    // would move the eyes once more after the hold began.
     function freeze(now) {
       for (let i = 0; i < FIELDS.length; i++) {
-        const v = segValue(segs[i], now);
+        const v = shown[i];
         segs[i] = { from: v, to: v, durationMs: 0, easing: 0, startAt: now };
       }
       dirty = true;
