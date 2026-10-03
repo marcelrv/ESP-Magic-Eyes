@@ -232,6 +232,7 @@ Plain HTML/CSS/JS served from LittleFS `/www` (no Node/build toolchain, no CDN d
 ```
 data/www/
   index.html          landing page — links to Control / Setup, live status; prompts WiFi setup if in AP mode
+  favicon.svg         eye icon for the browser tab (every page links it)
   css/app.css          shared styling, mobile-first, distinct "control" vs "setup" (amber/maintenance) theming
   js/api.js            shared fetch wrapper, pollEvery() live-refresh helper, throttle(), XHR upload-with-progress helper
   js/eyes.js           live cartoon eyes (home, manual, play-mode and status pages): polls /api/eyes/pose (~4-5 requests/s per visible page with current firmware, animated locally with requestAnimationFrame from the per-axis `seg` segments; falls back to back-to-back sampling, ~12/s, on firmware without `seg`; dims while `held`), backs off on errors, pauses while hidden or off-screen; draws the *commanded* pan/tilt/lids; no servo feedback exists
