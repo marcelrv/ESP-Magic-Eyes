@@ -26,11 +26,24 @@
 
 #pragma once
 
+#include <cstdint>
+
 class AsyncWebServer;
+enum class RadarType : uint8_t; // storage/nvs_store.h
 
 namespace RadarRoutes {
 
 void registerRoutes(AsyncWebServer &server);
+
+// The API's radar type strings ("none" | "ld2420" | "ld2450") and the
+// accepted LD2420 baud range, shared with the settings backup
+// (api/backup_routes.*) so a backup file uses exactly the radar page's
+// vocabulary and limits. parseRadarType() leaves *out untouched and
+// returns false for anything else, including nullptr.
+const char *radarTypeId(RadarType type);
+bool parseRadarType(const char *id, RadarType *out);
+constexpr uint32_t kMinBaud = 1200;
+constexpr uint32_t kMaxBaud = 1000000;
 
 // Fires the deferred restart scheduled by POST /api/radar/config, once its
 // short delay has elapsed — mirrors ota_routes.cpp's/rest_routes.cpp's

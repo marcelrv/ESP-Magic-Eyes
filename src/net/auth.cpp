@@ -182,7 +182,7 @@ bool isApiRequest(AsyncWebServerRequest *request) { return request->url().starts
 const char *const kAdminPrefixes[] = {
     "/setup",            "/api/wifi/",          "/api/servos/",        "/api/radar/config",
     "/api/led/",         "/api/ota/",           "/api/system/reboot",  "/api/system/config",
-    "/api/auth/",
+    "/api/auth/",        "/api/system/backup",  "/api/system/restore",
 };
 
 } // namespace

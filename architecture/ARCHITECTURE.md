@@ -113,6 +113,8 @@ Base path `/api`. Every route needs the **Control** or **Admin** password once t
 - `GET /api/system/status` — current play mode, WiFi mode/IP, `naturalMode`, current pose snapshot
 - `POST /api/system/config` `{otaNetworkEnabled?, naturalMode?}` — partial update (admin; the manual page uses `/api/eyes/natural` for the natural-mode toggle)
 - `POST /api/system/reboot`
+- `GET /api/system/backup[?secrets=1]` — every NVS setting as a pretty-printed JSON file (`format: "esp-magic-eyes-settings"`, `formatVersion: 1`): names, `naturalMode`, `otaNetworkEnabled`, radar, LED, and all 7 servos' calibration by name. `secrets=1` adds `wifi {ssid, password}` (plain text) and `passwords` (the three stored hashes). Field-by-field rather than raw blobs, so it restores onto any board and later firmware (`src/api/backup_routes.*`, layout in its header).
+- `POST /api/system/restore` — a backup file as the body. Validated completely before the first write (servo values through the same `ServoRoutes::calibrationError()` as `POST /api/servos/config`; servos matched by name, so a renumbered enum can't swap them); every section optional, an absent one keeps the device's value; an empty WiFi SSID restores nothing. Writes, then reboots (deferred). The page sends it compact, well within the 4 KB body limit.
 
 **WiFi / Setup**
 - `GET /api/wifi/scan` — cached scan results (scanned only before the AP comes up — at boot, or asynchronously when falling back to the AP — to avoid the documented `WiFi.scanNetworks()` vs. active-AP conflict)
@@ -168,7 +170,7 @@ Base path `/api`. Every route needs the **Control** or **Admin** password once t
 |---|---|---|
 | Public | — | `GET /api/auth/status` only |
 | Control | `user` (or `admin`) | static pages outside `/setup`, `/api/eyes/*`, `/api/gestures*`, `/api/playmodes*`, `/api/system/info`, `/api/system/status`, `/api/radar/status`, `/api/radar/latest` |
-| Admin | `admin` (or `user` while no admin password is set) | `/setup/*`, `/api/wifi/*`, `/api/servos/*`, `/api/radar/config`, `/api/led/*`, `/api/ota/*`, `/api/system/reboot`, `/api/system/config`, `/api/auth/password`, ArduinoOTA |
+| Admin | `admin` (or `user` while no admin password is set) | `/setup/*`, `/api/wifi/*`, `/api/servos/*`, `/api/radar/config`, `/api/led/*`, `/api/ota/*`, `/api/system/reboot`, `/api/system/config`, `/api/system/backup`, `/api/system/restore`, `/api/auth/password`, ArduinoOTA |
 
 The level comes from the URL alone (`Auth::requiredLevel()`); a URL containing a dot segment (`/.`, which covers `/./` and `/../`), `..`, `//` or `\` is treated as Admin, since LittleFS resolves `.` and `..` (`/./setup/wifi.html` would otherwise be served as a control-level page). HTTP **Digest** is used so the browser's own login prompt works for pages, `fetch` and XHR, and the password itself never crosses the network.
 
@@ -244,7 +246,7 @@ data/www/
     wifi.html             AP-mode captive-portal setup + normal STA re-config (scan + manual entry, connect, forget)
     calibration.html      per-servo min/center/max controls with live "test" button, save
     radar.html            live radar visualization/test page
-    ota.html               firmware/filesystem upload with progress bar, current version display
+    ota.html               firmware/filesystem upload with progress bar, current version display, settings backup download/restore
     led.html                LED enable/brightness/color/effect config
     security.html           control/admin passwords
 ```
@@ -354,7 +356,7 @@ All nine build phases (scaffold → integration) are complete. PROGRESS.md is th
 
 **Hardware-verified** (LD2420 board): WiFi setup, fallback and recovery (including a wrong password via the API), calibration (hold, NVS migration, half-open point), gestures and abort-restore, sticky manual eyelids, greeting → idle, web OTA (including recovery from an interrupted upload), the WiFi update check, serial console.
 
-**Not yet verified on hardware:** the pose segments and the live eyes' local animation (`seg`/`held` in `GET /api/eyes/pose`, `js/eyes.js`: blinks drawn exactly at ~4-5 requests/s), the install half of update-over-WiFi (§8: the streamed firmware + filesystem download and its failure paths; the check itself, with TLS, SNTP and manifest parsing, works on the board), LD2450 decoding and tracking, `millis()` wrap (~49.7 days), NVS write-failure handling, the PR #2 changes (runtime radar selection, AP kept up during retries, async fallback scan, pulse-exact calibration-hold exit, per-request body buffers), and password protection (§4a) in any respect: browser prompts, body/upload guards, lockout, ArduinoOTA `--auth`, and recovery.
+**Not yet verified on hardware:** the pose segments and the live eyes' local animation (`seg`/`held` in `GET /api/eyes/pose`, `js/eyes.js`: blinks drawn exactly at ~4-5 requests/s), the settings backup/restore (`/api/system/backup`, `/api/system/restore` and the Firmware page card; only compiled), the install half of update-over-WiFi (§8: the streamed firmware + filesystem download and its failure paths; the check itself, with TLS, SNTP and manifest parsing, works on the board), LD2450 decoding and tracking, `millis()` wrap (~49.7 days), NVS write-failure handling, the PR #2 changes (runtime radar selection, AP kept up during retries, async fallback scan, pulse-exact calibration-hold exit, per-request body buffers), and password protection (§4a) in any respect: browser prompts, body/upload guards, lockout, ArduinoOTA `--auth`, and recovery.
 
 **Deliberately deferred:**
 - HTTPS, and a configurable setup-AP password (see §4a's known limitations).

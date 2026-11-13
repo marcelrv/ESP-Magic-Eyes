@@ -33,4 +33,9 @@ void registerRoutes(AsyncWebServer &server);
 // has passed for the HTTP response to actually flush to the client.
 void handle();
 
+// Schedules the same deferred restart from another route (the settings
+// restore): call after sending the response; handle() restarts once it
+// has had time to flush.
+void scheduleReboot();
+
 } // namespace RestRoutes

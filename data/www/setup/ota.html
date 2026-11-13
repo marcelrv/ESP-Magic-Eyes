@@ -72,6 +72,25 @@
     <span class="mono">platformio.ini</span>. See <a href="security.html">Security</a>.</p>
 
   <div class="card">
+    <h3>Settings backup</h3>
+    <p class="small muted">Saves every setting &mdash; servo calibration, radar, LED, names &mdash; to a file on this
+      computer. Restoring it on this or another Magic Eyes needs no new calibration.</p>
+    <div class="switch-row" style="margin-bottom:0.5rem;">
+      <label for="bk-secrets" style="margin:0;">Include WiFi network and passwords</label>
+      <input type="checkbox" id="bk-secrets">
+    </div>
+    <p class="small muted">The file then holds your WiFi password in plain text. Keep it somewhere safe.</p>
+    <button class="btn btn-primary btn-block" id="bk-download-btn">Download settings</button>
+
+    <h3 style="margin-top:1rem;">Restore settings</h3>
+    <p class="small muted">Choose a settings file. Everything in it replaces the current settings, then the device
+      restarts. If the file holds WiFi and passwords, the device joins that network and asks for those passwords.</p>
+    <input type="file" id="rs-file" accept=".json,application/json">
+    <p class="small mono" id="rs-status" style="margin-top:0.35rem;"></p>
+    <button class="btn btn-block" id="rs-restore-btn" style="margin-top:0.5rem;" disabled>Restore settings</button>
+  </div>
+
+  <div class="card">
     <h3>Firmware update</h3>
     <p class="small muted">Upload a compiled firmware <span class="mono">.bin</span> (app image). The device reboots automatically on success.</p>
     <input type="file" id="fw-file" accept=".bin">
@@ -103,7 +122,9 @@
     msgEl.classList.remove('hidden');
   }
 
+  var runningVersion = ''; // for the settings-restore version notice
   Api.getSystemInfo().then(function (info) {
+    runningVersion = info.firmwareVersion || '';
     document.getElementById('cur-version').textContent = (info.firmwareVersion || '—') +
       (info.gitSha && info.gitSha !== 'unknown' ? '+' + info.gitSha : '');
     document.getElementById('cur-build').textContent = info.buildDate || '—';
@@ -288,6 +309,118 @@
         }
       });
     }, 1000, function () { /* device may be mid-reboot, expected to fail transiently */ });
+  }
+
+  // ---- settings backup / restore -------------------------------------------
+  var bkBtn = document.getElementById('bk-download-btn');
+  var bkSecrets = document.getElementById('bk-secrets');
+  var rsFile = document.getElementById('rs-file');
+  var rsBtn = document.getElementById('rs-restore-btn');
+  var rsStatus = document.getElementById('rs-status');
+
+  function saveFile(name, text) {
+    var url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  bkBtn.addEventListener('click', function () {
+    bkBtn.disabled = true;
+    Api.getSettingsBackup(bkSecrets.checked).then(function (backup) {
+      var day = new Date().toISOString().slice(0, 10);
+      var host = String(backup.hostname || 'magic-eyes').replace(/[^A-Za-z0-9-]/g, '');
+      saveFile(host + '-settings-' + day + '.json', JSON.stringify(backup, null, 2) + '\n');
+      showMsg('Settings downloaded' + (bkSecrets.checked ? ', including WiFi and passwords.' : '.'), 'ok');
+    }).catch(function (err) {
+      showMsg('Could not download the settings: ' + err.message, 'error');
+    }).then(function () { bkBtn.disabled = false; });
+  });
+
+  rsFile.addEventListener('change', function () {
+    rsBtn.disabled = !rsFile.files.length;
+    rsStatus.textContent = '';
+  });
+
+  rsBtn.addEventListener('click', function () {
+    var file = rsFile.files[0];
+    if (!file) return;
+    file.text().then(function (text) {
+      var backup;
+      try {
+        backup = JSON.parse(text);
+      } catch (e) {
+        throw new Error('this is not a settings file (not valid JSON)');
+      }
+      if (!backup || backup.format !== 'esp-magic-eyes-settings') {
+        throw new Error('this is not a Magic Eyes settings file');
+      }
+      var extras = [];
+      if (backup.wifi && backup.wifi.ssid) extras.push('WiFi network "' + backup.wifi.ssid + '"');
+      if (backup.passwords) extras.push('the passwords');
+      // Mirrors kFormatVersion in src/api/backup_routes.cpp. The device
+      // refuses newer files itself; checking here gives a readable message.
+      if (backup.formatVersion > 1) {
+        throw new Error('this file comes from newer firmware' +
+          (backup.firmwareVersion ? ' (' + backup.firmwareVersion + ')' : '') +
+          '. Update this device first, then restore it.');
+      }
+      // A different firmware version is fine (the file stores settings by
+      // name, not raw storage), but say so, so it's never a surprise.
+      var versionNote = '';
+      if (backup.firmwareVersion && runningVersion && backup.firmwareVersion !== runningVersion) {
+        versionNote = '\n\nNote: this backup is from firmware ' + backup.firmwareVersion +
+          '; this device runs ' + runningVersion + '. Settings are converted where needed, and anything ' +
+          'this firmware doesn\'t know is skipped.';
+      }
+      var question = 'Restore the settings from ' + file.name +
+        (backup.firmwareVersion ? ' (saved by firmware ' + backup.firmwareVersion + ')' : '') + '?\n\n' +
+        'The current settings' + (extras.length ? ', including ' + extras.join(' and ') + ',' : '') +
+        ' are replaced and the device restarts.' + versionNote;
+      if (!window.confirm(question)) return;
+      rsBtn.disabled = rsFile.disabled = true;
+      rsStatus.textContent = 'Restoring…';
+      // Api.post sends it compact, well under the device's 4 KB body limit.
+      return Api.restoreSettings(backup).then(function () {
+        rsStatus.textContent = 'Restored. Restarting…';
+        var note = backup.wifi && backup.wifi.ssid
+          ? ' If it joins a different network or gets a new name, find it there instead of reloading this page.' : '';
+        showMsg('Settings restored. The device is restarting.' + note, 'ok');
+        waitForRestart();
+      });
+    }).catch(function (err) {
+      rsStatus.textContent = '';
+      showMsg('Restore failed: ' + err.message, 'error');
+      rsBtn.disabled = !rsFile.files.length;
+      rsFile.disabled = false;
+    });
+  });
+
+  // Back online = answering again with an uptime shorter than the time since
+  // the restore (the old boot's uptime can't be; 1 s covers request
+  // latency). A 401 also means it is back, now asking for the restored
+  // passwords.
+  function waitForRestart() {
+    var restoredAt = Date.now();
+    var stop = Api.pollEvery(function () {
+      return Api.getSystemInfo().then(function (info) {
+        if (info.uptimeMs + 1000 < Date.now() - restoredAt) {
+          stop();
+          showMsg('Settings restored and the device is back online. Reloading…', 'ok');
+          setTimeout(function () { window.location.reload(); }, 1500);
+        }
+      }, function (err) {
+        if (err.status === 401) {
+          stop();
+          window.location.reload();
+        }
+        throw err;
+      });
+    }, 2000, function () { /* mid-restart: expected to fail for a few seconds */ });
   }
 
   wireUpload('fw-file', 'fw-upload-btn', 'fw-progress', 'fw-status', '/api/ota/firmware', 'firmware');

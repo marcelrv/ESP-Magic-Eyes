@@ -60,8 +60,11 @@ void handleLatest(AsyncWebServerRequest *request) {
   sendJson(request, doc);
 }
 
-// Radar type <-> API string ("none" | "ld2420" | "ld2450").
-const char *radarTypeId(RadarType type) {
+} // namespace
+
+// Radar type <-> API string ("none" | "ld2420" | "ld2450"). Public (see
+// radar_routes.h): the settings backup uses the same strings.
+const char *RadarRoutes::radarTypeId(RadarType type) {
   switch (type) {
     case RadarType::LD2420:
       return "ld2420";
@@ -73,13 +76,18 @@ const char *radarTypeId(RadarType type) {
   return "none";
 }
 
-bool parseRadarType(const char *id, RadarType *out) {
+bool RadarRoutes::parseRadarType(const char *id, RadarType *out) {
   if (id == nullptr) return false;
   if (strcmp(id, "none") == 0) { *out = RadarType::None; return true; }
   if (strcmp(id, "ld2420") == 0) { *out = RadarType::LD2420; return true; }
   if (strcmp(id, "ld2450") == 0) { *out = RadarType::LD2450; return true; }
   return false;
 }
+
+namespace {
+
+using RadarRoutes::parseRadarType;
+using RadarRoutes::radarTypeId;
 
 // --- GET /api/radar/config -----------------------------------------------
 // `type` is the saved setting; `activeType` is what RadarTask started with
@@ -100,8 +108,8 @@ void handleGetConfig(AsyncWebServerRequest *request) {
 // Deferred-restart pattern matches
 // ota_routes.cpp/rest_routes.cpp: respond first, let AsyncTCP flush that
 // response, then ESP.restart().
-constexpr uint32_t kMinBaud = 1200;
-constexpr uint32_t kMaxBaud = 1000000;
+using RadarRoutes::kMaxBaud;
+using RadarRoutes::kMinBaud;
 
 bool gRestartPending = false;
 uint32_t gRestartAtMs = 0;
