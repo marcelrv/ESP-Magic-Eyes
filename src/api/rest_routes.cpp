@@ -4,8 +4,11 @@
 #include <ESPAsyncWebServer.h>
 #include <esp_system.h>
 
+#include <atomic>
+
 #include "api/json_helpers.h"
 #include "hal/led_controller.h"
+#include "motion/eye_pose.h" // deadlineReached()
 #include "motion/motion_task.h"
 #include "motion/natural_mode.h"
 #include "motion/playmode_manager.h"
@@ -129,8 +132,9 @@ void handleSystemConfigBody(AsyncWebServerRequest *request, uint8_t *data, size_
 // rest_routes.h). Mirrors ota_routes.cpp's/wifi_routes.cpp's existing
 // deferred-restart pattern: respond first, then let AsyncTCP flush that
 // response before ESP.restart() tears the connection down.
-bool gRebootPending = false;
-uint32_t gRebootAtMs = 0;
+// Written by the AsyncTCP task (reboot/restore routes), read by loop().
+std::atomic<bool> gRebootPending{false};
+std::atomic<uint32_t> gRebootAtMs{0};
 constexpr uint32_t kRebootDelayMs = 500;
 
 void handleReboot(AsyncWebServerRequest *request) {
@@ -138,9 +142,7 @@ void handleReboot(AsyncWebServerRequest *request) {
   doc["success"] = true;
   doc["message"] = "Rebooting.";
   JsonHelpers::sendJson(request, doc);
-
-  gRebootPending = true;
-  gRebootAtMs = millis() + kRebootDelayMs;
+  RestRoutes::scheduleReboot();
 }
 
 } // namespace
@@ -154,10 +156,17 @@ void registerRoutes(AsyncWebServer &server) {
   server.on("/api/system/reboot", HTTP_POST, handleReboot);
 }
 
+// The deadline is stored before the flag, so loop() never sees the flag
+// with a stale deadline.
+void scheduleReboot() {
+  gRebootAtMs = millis() + kRebootDelayMs;
+  gRebootPending = true;
+}
+
 void handle() {
-  if (gRebootPending && millis() >= gRebootAtMs) {
+  if (gRebootPending && deadlineReached(millis(), gRebootAtMs)) {
     gRebootPending = false;
-    Serial.println("[System] Rebooting via POST /api/system/reboot...");
+    Serial.println("[System] Rebooting (requested over HTTP)...");
     ESP.restart();
   }
 }

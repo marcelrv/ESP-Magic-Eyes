@@ -157,6 +157,9 @@ const Api = (() => {
     getSystemStatus: () => get("/api/system/status"),
     setSystemConfig: (cfg) => post("/api/system/config", cfg),
     reboot: () => post("/api/system/reboot"),
+    // Settings backup: secrets adds WiFi credentials + password hashes.
+    getSettingsBackup: (secrets) => get("/api/system/backup" + (secrets ? "?secrets=1" : "")),
+    restoreSettings: (backup) => post("/api/system/restore", backup),
 
     // --- passwords ------------------------------------------------------
     getAuthStatus: () => get("/api/auth/status"),
