@@ -315,9 +315,15 @@ const char *buildPlan(JsonDocument &doc, RestorePlan &plan) {
     if (!isHashOrEmpty(pw["adminHa1"]) || !isHashOrEmpty(pw["userHa1"]) || !isHashOrEmpty(pw["otaMd5"])) {
       return "invalid_passwords";
     }
+    // Lowercased: both the Digest check and ArduinoOTA feed the stored hash
+    // into the next MD5 character for character, and the device's own hashes
+    // are lowercase, so a hand-edited uppercase hash would lock you out.
     plan.hashes.adminHa1 = pw["adminHa1"].as<const char *>();
     plan.hashes.userHa1 = pw["userHa1"].as<const char *>();
     plan.hashes.otaMd5 = pw["otaMd5"].as<const char *>();
+    plan.hashes.adminHa1.toLowerCase();
+    plan.hashes.userHa1.toLowerCase();
+    plan.hashes.otaMd5.toLowerCase();
     // Both derive from the admin password (nvs_store.h): set or empty together.
     if ((plan.hashes.adminHa1.length() == 0) != (plan.hashes.otaMd5.length() == 0)) return "invalid_passwords";
     plan.hasPasswords = true;

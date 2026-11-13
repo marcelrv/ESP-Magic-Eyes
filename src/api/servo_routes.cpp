@@ -108,11 +108,12 @@ void handlePostConfigBody(AsyncWebServerRequest *request, uint8_t *data, size_t 
   int closedUs = lid ? reqDoc["closedUs"].as<int>() : kAbsMinUs;
   int openUs = lid ? reqDoc["openUs"].as<int>() : kAbsMinUs;
   int halfUs = lid && reqDoc["halfUs"].is<int>() ? reqDoc["halfUs"].as<int>() : (closedUs + openUs) / 2;
-  // A point outside the absolute bounds can't lie within min..max either;
-  // rejecting it before the uint16_t narrowing below keeps a wild value
-  // (e.g. 66536) from wrapping into the valid range. The ordering rules
-  // proper live in calibrationError().
-  for (int us : {centerUs, closedUs, openUs, halfUs}) {
+  // Every pulse, the limits included, must be within the absolute bounds
+  // before the uint16_t narrowing below, or a wild value would wrap into
+  // the valid range (minUs 66536 becomes 1000). A min above 2600 or a max
+  // below 400 can't be ordered correctly anyway, hence the error code; the
+  // ordering rules proper live in calibrationError().
+  for (int us : {minUs, maxUs, centerUs, closedUs, openUs, halfUs}) {
     if (us < kAbsMinUs || us > kAbsMaxUs) {
       sendJsonError(request, 400, "invalid_range_ordering");
       return;

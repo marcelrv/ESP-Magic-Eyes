@@ -385,12 +385,13 @@
       rsBtn.disabled = rsFile.disabled = true;
       rsStatus.textContent = 'Restoring…';
       // Api.post sends it compact, well under the device's 4 KB body limit.
+      var sentAt = Date.now();
       return Api.restoreSettings(backup).then(function () {
         rsStatus.textContent = 'Restored. Restarting…';
         var note = backup.wifi && backup.wifi.ssid
           ? ' If it joins a different network or gets a new name, find it there instead of reloading this page.' : '';
         showMsg('Settings restored. The device is restarting.' + note, 'ok');
-        waitForRestart();
+        waitForRestart(sentAt);
       });
     }).catch(function (err) {
       rsStatus.textContent = '';
@@ -400,15 +401,15 @@
     });
   });
 
-  // Back online = answering again with an uptime shorter than the time since
-  // the restore (the old boot's uptime can't be; 1 s covers request
-  // latency). A 401 also means it is back, now asking for the restored
-  // passwords.
-  function waitForRestart() {
-    var restoredAt = Date.now();
+  // Back online = the boot the device reports started after the restore was
+  // sent. now - uptimeMs is never earlier than the real boot moment (the
+  // device measured uptime before the reply reached us), the new boot comes
+  // after sentAt, and the old one came well before it. A 401 also means it
+  // is back, now asking for the restored passwords.
+  function waitForRestart(sentAt) {
     var stop = Api.pollEvery(function () {
       return Api.getSystemInfo().then(function (info) {
-        if (info.uptimeMs + 1000 < Date.now() - restoredAt) {
+        if (Date.now() - info.uptimeMs >= sentAt) {
           stop();
           showMsg('Settings restored and the device is back online. Reloading…', 'ok');
           setTimeout(function () { window.location.reload(); }, 1500);
