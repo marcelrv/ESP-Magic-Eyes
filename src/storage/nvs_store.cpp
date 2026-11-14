@@ -385,6 +385,11 @@ bool setServoCalibration(ServoId id, const ServoCalibration &cal) {
   return saveServoCalTable(table);
 }
 
+bool setServoCalibrationTable(const ServoCalibration (&table)[kServoCount]) {
+  NvsLock lock;
+  return saveServoCalTable(table);
+}
+
 LedColorConfig getLedColorConfig() {
   NvsLock lock;
   LedColorConfig cfg; // defaults (see nvs_store.h)

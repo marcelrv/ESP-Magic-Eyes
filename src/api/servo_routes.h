@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include "storage/nvs_store.h" // ServoCalibration, ServoId
+
 class AsyncWebServer;
 
 namespace ServoRoutes {
@@ -33,5 +35,14 @@ namespace ServoRoutes {
 // Registers the routes above. Does not call server.begin() — that's
 // WebServer::begin()'s job.
 void registerRoutes(AsyncWebServer &server);
+
+// The one set of calibration rules, shared by POST /api/servos/config and
+// the settings restore (api/backup_routes.*), so a restored table can
+// never hold values the calibration page itself would refuse. Checks only
+// the fields servo `id`'s kind uses: min/max within 400-2600 with
+// min < max, then for lids closed/open within min..max, closed != open
+// and half strictly between them; for gaze/aux min < center < max.
+// Returns nullptr when valid, else the API error code.
+const char *calibrationError(ServoId id, const ServoCalibration &cal);
 
 } // namespace ServoRoutes

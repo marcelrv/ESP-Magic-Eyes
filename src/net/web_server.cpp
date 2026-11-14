@@ -5,6 +5,7 @@
 #include <LittleFS.h>
 
 #include "api/auth_routes.h"
+#include "api/backup_routes.h"
 #include "api/eyes_routes.h"
 #include "api/gesture_routes.h"
 #include "api/led_routes.h"
@@ -69,6 +70,7 @@ void begin() {
 
   AuthRoutes::registerRoutes(gServer);
   RestRoutes::registerRoutes(gServer);
+  BackupRoutes::registerRoutes(gServer);
   OtaRoutes::registerRoutes(gServer);
   ServoRoutes::registerRoutes(gServer);
   EyesRoutes::registerRoutes(gServer);

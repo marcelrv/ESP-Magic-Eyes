@@ -3,6 +3,8 @@
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 
+#include <initializer_list>
+
 #include "api/json_helpers.h"
 #include "hal/servo_hal.h"
 #include "motion/motion_task.h"
@@ -102,42 +104,38 @@ void handlePostConfigBody(AsyncWebServerRequest *request, uint8_t *data, size_t 
     sendJsonError(request, 400, "pulse_out_of_absolute_bounds");
     return;
   }
+  int centerUs = lid ? kAbsMinUs : reqDoc["centerUs"].as<int>();
+  int closedUs = lid ? reqDoc["closedUs"].as<int>() : kAbsMinUs;
+  int openUs = lid ? reqDoc["openUs"].as<int>() : kAbsMinUs;
+  int halfUs = lid && reqDoc["halfUs"].is<int>() ? reqDoc["halfUs"].as<int>() : (closedUs + openUs) / 2;
+  // Every pulse, the limits included, must be within the absolute bounds
+  // before the uint16_t narrowing below, or a wild value would wrap into
+  // the valid range (minUs 66536 becomes 1000). A min above 2600 or a max
+  // below 400 can't be ordered correctly anyway, hence the error code; the
+  // ordering rules proper live in calibrationError().
+  for (int us : {minUs, maxUs, centerUs, closedUs, openUs, halfUs}) {
+    if (us < kAbsMinUs || us > kAbsMaxUs) {
+      sendJsonError(request, 400, "invalid_range_ordering");
+      return;
+    }
+  }
 
   ServoCalibration cal = NvsStore::getServoCalibration(id); // keeps fields this kind doesn't use
   cal.minUs = static_cast<uint16_t>(minUs);
   cal.maxUs = static_cast<uint16_t>(maxUs);
-
   if (lid) {
-    int closedUs = reqDoc["closedUs"].as<int>();
-    int openUs = reqDoc["openUs"].as<int>();
-    if (!(minUs < maxUs) || closedUs < minUs || closedUs > maxUs || openUs < minUs || openUs > maxUs) {
-      sendJsonError(request, 400, "invalid_range_ordering"); // requires minUs <= closedUs, openUs <= maxUs
-      return;
-    }
-    if (closedUs == openUs) {
-      sendJsonError(request, 400, "closed_equals_open");
-      return;
-    }
-    int halfUs = reqDoc["halfUs"].is<int>() ? reqDoc["halfUs"].as<int>() : (closedUs + openUs) / 2;
-    // Must lie strictly between closed and open, or the mapping would
-    // reverse direction partway through.
-    if (!((closedUs < halfUs && halfUs < openUs) || (openUs < halfUs && halfUs < closedUs))) {
-      sendJsonError(request, 400, "half_not_between_closed_and_open");
-      return;
-    }
     cal.closedUs = static_cast<uint16_t>(closedUs);
     cal.openUs = static_cast<uint16_t>(openUs);
     cal.halfUs = static_cast<uint16_t>(halfUs);
     cal.centerUs = static_cast<uint16_t>((closedUs + openUs) / 2);
   } else {
-    int centerUs = reqDoc["centerUs"].as<int>();
-    if (!(minUs < centerUs && centerUs < maxUs)) {
-      sendJsonError(request, 400, "invalid_range_ordering"); // requires minUs < centerUs < maxUs
-      return;
-    }
     cal.centerUs = static_cast<uint16_t>(centerUs);
     // Omitted "inverted" keeps the currently saved value.
     cal.inverted = reqDoc["inverted"] | cal.inverted;
+  }
+  if (const char *error = ServoRoutes::calibrationError(id, cal)) {
+    sendJsonError(request, 400, error);
+    return;
   }
 
   if (!NvsStore::setServoCalibration(id, cal)) {
@@ -267,6 +265,32 @@ void handlePostPoseBody(AsyncWebServerRequest *request, uint8_t *data, size_t le
 } // namespace
 
 namespace ServoRoutes {
+
+const char *calibrationError(ServoId id, const ServoCalibration &cal) {
+  int minUs = cal.minUs, maxUs = cal.maxUs;
+  if (minUs < kAbsMinUs || maxUs > kAbsMaxUs) {
+    return "pulse_out_of_absolute_bounds";
+  }
+  if (isLidServo(id)) {
+    int closedUs = cal.closedUs, openUs = cal.openUs, halfUs = cal.halfUs;
+    if (!(minUs < maxUs) || closedUs < minUs || closedUs > maxUs || openUs < minUs || openUs > maxUs) {
+      return "invalid_range_ordering"; // requires minUs <= closedUs, openUs <= maxUs
+    }
+    if (closedUs == openUs) {
+      return "closed_equals_open";
+    }
+    // Must lie strictly between closed and open, or the mapping would
+    // reverse direction partway through.
+    if (!((closedUs < halfUs && halfUs < openUs) || (openUs < halfUs && halfUs < closedUs))) {
+      return "half_not_between_closed_and_open";
+    }
+    return nullptr;
+  }
+  if (!(minUs < cal.centerUs && cal.centerUs < maxUs)) {
+    return "invalid_range_ordering"; // requires minUs < centerUs < maxUs
+  }
+  return nullptr;
+}
 
 void registerRoutes(AsyncWebServer &server) {
   server.on("/api/servos/config", HTTP_GET, handleGetConfig);

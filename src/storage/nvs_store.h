@@ -150,6 +150,9 @@ ServoCalibration getDefaultServoCalibration(ServoId id);
 // Returns false if the table could not be written to NVS (e.g. flash/NVS
 // full) — the previously saved calibration is then still in effect.
 bool setServoCalibration(ServoId id, const ServoCalibration &cal);
+// All 7 servos in one NVS write (settings restore): either the whole new
+// table is stored or the old one stays. Same failure semantics as above.
+bool setServoCalibrationTable(const ServoCalibration (&table)[static_cast<size_t>(ServoId::Count)]);
 
 // --- led namespace (Phase 6) -----------------------------------------------
 // Brightness/colorL/colorR/effect, packed as one blob (see LedColorConfig

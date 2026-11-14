@@ -89,6 +89,7 @@ From the **Setup** section:
 - **Calibration** — teach the device where the eyes' key positions are (see [Calibrating the eyes](#calibrating-the-eyes) below). Do this once after first assembling the mechanism, and again if you ever notice a servo straining, the eyes not looking straight, or the eyelids not closing or matching.
 - **Radar test** — choose which radar sensor is fitted (or none), and see a live view of what it is currently detecting, useful for checking it's wired correctly and positioned well.
 - **Firmware update** — update the device's software over WiFi, without needing to reconnect it to a computer. (You can also always update it the original way, by reconnecting the USB cable and using PlatformIO, as in the initial setup.)
+  The same page can **download your settings** to a file (calibration, radar, LED and names; tick the box to include the WiFi network and passwords too) and **restore** them later, on this device or on a replacement board, so you don't have to calibrate again. With WiFi included, the file contains your WiFi password in readable form, so keep it somewhere safe.
 - **LED (optional)** — once a glow light is wired in, turn it on/off and choose its color and brightness here.
 - **Security** — set the passwords (see below).
 
